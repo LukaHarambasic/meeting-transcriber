@@ -5,16 +5,10 @@ struct MenuBarView: View {
     let pipelineQueue: PipelineQueue
     var updateChecker: UpdateChecker?
     let onRecordMeeting: () -> Void
-    let onRecordApp: () -> Void
-    let onRecordMicrophone: () -> Void
-    /// Whether the user set "No Microphone (app audio only)". Only reaches the
-    /// microphone item, which it disables with a reason.
-    let noMic: Bool
     /// The *wide* predicate: a manual recording that is running, or a start that
     /// has registered and not yet built its loop. `state == .recording` misses
-    /// that second window, and the microphone item would sit enabled through it
-    /// handing back a dead click, which is what `AppPickerStartState` was built
-    /// to avoid on the picker.
+    /// that second window, and the Record item would sit enabled through it
+    /// handing back a dead click.
     let manualRecordingPendingOrActive: Bool
     let onStopManualRecording: (() -> Void)?
     let onOpenLastProtocol: () -> Void
@@ -28,13 +22,6 @@ struct MenuBarView: View {
 
     private var state: TranscriberState {
         status?.state ?? .idle
-    }
-
-    private var microphoneAvailability: MicrophoneRecordingAvailability {
-        .resolve(
-            isRecording: manualRecordingPendingOrActive || state == .recording,
-            noMic: noMic,
-        )
     }
 
     /// Hoisted out of the `ViewBuilder`: an `Optional.map` returning an
@@ -128,34 +115,20 @@ struct MenuBarView: View {
             }
             .keyboardShortcut(".")
         } else if state != .recording {
-            // Primary entry point: the one-click "sit in a meeting room" shape,
-            // so it sits above the narrower Record Microphone and takes the
-            // shortcut that used to be Record App's — always enabled, since
-            // there is no permission or setting that turns it into a recording
-            // of nothing (see `WatchLoop.startMeetingRecording`).
+            // THE record action, deliberately without siblings: the owner never
+            // wants to choose a capture shape at record time. One press records
+            // everything the Mac plays plus the microphone; narrower shapes
+            // (mic-only, single app) exist only behind the automation API.
+            // Always enabled — no permission or setting turns this into a
+            // recording of nothing (see `WatchLoop.startMeetingRecording`).
             Button {
                 onRecordMeeting()
             } label: {
-                Label("Record Meeting", systemImage: "record.circle.fill")
+                Label("Record", systemImage: "record.circle.fill")
             }
             .keyboardShortcut("r")
-            .help("Record all system audio and the microphone — for a meeting in the room")
-
-            Button {
-                onRecordMicrophone()
-            } label: {
-                Label("Record Microphone", systemImage: "mic.circle")
-            }
-            .keyboardShortcut("m")
-            .disabled(!microphoneAvailability.allowsStart)
-            .help(microphoneAvailability.disabledReason ?? "Record the system microphone, with no app audio")
-
-            Button {
-                onRecordApp()
-            } label: {
-                Label("Record App...", systemImage: "record.circle")
-            }
-            .keyboardShortcut("a")
+            .disabled(manualRecordingPendingOrActive)
+            .help("Record the meeting: all system audio plus the microphone")
         }
 
         if let onNameSpeakers {
