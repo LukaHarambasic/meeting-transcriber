@@ -101,7 +101,7 @@ final class DualSourceRecorderLifecycleTests: XCTestCase {
         let configuration = try XCTUnwrap(session.lastConfiguration)
         XCTAssertNil(configuration.appOutputURL, "a tap would capture a meeting that is happening in the room")
         XCTAssertNotNil(configuration.micOutputURL)
-        XCTAssertTrue(configuration.pids.isEmpty)
+        XCTAssertEqual(configuration.tapTarget, .processes([]))
     }
 
     /// The mirror image: "No Microphone" opens the tap and no mic track.
@@ -117,7 +117,36 @@ final class DualSourceRecorderLifecycleTests: XCTestCase {
         let configuration = try XCTUnwrap(session.lastConfiguration)
         XCTAssertNotNil(configuration.appOutputURL)
         XCTAssertNil(configuration.micOutputURL)
-        XCTAssertEqual(configuration.pids, [999_999])
+        XCTAssertEqual(configuration.tapTarget, .processes([999_999]))
+    }
+
+    /// "Record Meeting": the tap target is the whole system mixdown, not a
+    /// process list — the case a PID-shaped tap target has no answer for at
+    /// all, unlike a plain empty process list.
+    func testASystemAndMicRecordingTapsTheWholeSystemMixdown() throws {
+        let dir = try makeTempDirectory(prefix: "lifecycle_system_and_mic")
+        let (recorder, session) = makeRecorder(dir: dir)
+
+        try recorder.start(source: .systemAndMic)
+
+        let configuration = try XCTUnwrap(session.lastConfiguration)
+        XCTAssertNotNil(configuration.appOutputURL)
+        XCTAssertNotNil(configuration.micOutputURL)
+        XCTAssertEqual(configuration.tapTarget, .systemMixdown)
+    }
+
+    /// The "No Microphone" mirror of the system-wide source: still the whole
+    /// mixdown, no mic track.
+    func testASystemOnlyRecordingOpensNoMicrophone() throws {
+        let dir = try makeTempDirectory(prefix: "lifecycle_system_only")
+        let (recorder, session) = makeRecorder(dir: dir)
+
+        try recorder.start(source: .systemOnly)
+
+        let configuration = try XCTUnwrap(session.lastConfiguration)
+        XCTAssertNotNil(configuration.appOutputURL)
+        XCTAssertNil(configuration.micOutputURL)
+        XCTAssertEqual(configuration.tapTarget, .systemMixdown)
     }
 
     /// A start that threw before capture opened is not an interrupted

@@ -218,6 +218,24 @@ class WatchLoop {
         )
     }
 
+    /// "Record Meeting": tap the whole system output and record the microphone,
+    /// for a meeting in the room where remote colleagues play through the
+    /// speakers rather than headphones.
+    ///
+    /// Unlike `startMicrophoneRecording`, `noMic` *is* honoured here — the same
+    /// "No Microphone (app audio only)" setting an app recording reads. Dropping
+    /// the mic channel is the right response to it for this source (the system
+    /// tap still captures everything), where refusing outright is the right
+    /// response for a microphone-only source that would otherwise record
+    /// nothing under it.
+    func startMeetingRecording() async throws {
+        try await startManualRecording(
+            source: .forSystem(noMic: noMic),
+            appName: ManualRecordingInfo.meetingAppName,
+            title: ManualRecordingInfo.meetingTitle,
+        )
+    }
+
     private func startManualRecording(
         source: RecordingSource,
         appName: String,

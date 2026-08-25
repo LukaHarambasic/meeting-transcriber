@@ -10,6 +10,24 @@ import Foundation
 enum ManualRecordingRequest {
     case app(pid: pid_t, appName: String, title: String)
     case microphone
+
+    /// "Record Meeting": the whole system output plus the microphone, for an
+    /// in-room meeting playing through the speakers rather than any one app.
+    case meeting
+}
+
+extension ManualRecordingRequest {
+    /// Whether this request opens a CATap process/system tap. `.app` and
+    /// `.meeting` both do; only `.microphone` opens no tap at all. Read before
+    /// a manual start to decide whether the Screen Recording grant needs
+    /// asking for — the one such start has no up-front moment for, unlike
+    /// `startWatching`.
+    var capturesAppAudio: Bool {
+        switch self {
+        case .app, .meeting: true
+        case .microphone: false
+        }
+    }
 }
 
 /// How a manual-recording start ended.

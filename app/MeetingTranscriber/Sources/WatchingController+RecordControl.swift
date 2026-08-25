@@ -11,12 +11,22 @@ import Foundation
 ///
 /// Every action is scoped to the recording its payload describes — the
 /// microphone when the payload names nothing else (the endpoint's original,
-/// only shape), or a specific app's capture. Anything *else* the loop can be
-/// doing is somebody else's recording here: a start refuses rather than
-/// clobbering it, and a stop leaves it alone rather than ending a meeting the
-/// caller never asked about.
+/// only shape), a specific app's capture, or the whole system output for
+/// "Record Meeting". Anything *else* the loop can be doing is somebody else's
+/// recording here: a start refuses rather than clobbering it, and a stop
+/// leaves it alone rather than ending a meeting the caller never asked about.
 @MainActor
 extension WatchingController {
+    /// "Record Meeting": the whole system output plus the microphone. No
+    /// `noMic` guard here, unlike `startMicrophoneRecording` — the system tap
+    /// captures something regardless, so the loop honours the setting by
+    /// dropping the mic channel instead of refusing. Lives here rather than
+    /// alongside `startMicrophoneRecording`, for the reason this file exists at
+    /// all: the line cap.
+    func startMeetingRecording() {
+        beginManualRecording(.meeting)
+    }
+
     /// Whether a microphone-only recording is in progress.
     ///
     /// Derived from `activeRecordingSource`, the loop's own answer to "what is
@@ -61,6 +71,10 @@ extension WatchingController {
         case let .app(pid, _, _):
             guard let loop = watchLoop, loop.isManualRecording else { return false }
             return loop.activeRecordingSource != nil && loop.manualRecordingInfo?.pid == pid
+
+        case .meeting:
+            guard let loop = watchLoop, loop.isManualRecording else { return false }
+            return loop.activeRecordingSource == .systemAndMic || loop.activeRecordingSource == .systemOnly
         }
     }
 

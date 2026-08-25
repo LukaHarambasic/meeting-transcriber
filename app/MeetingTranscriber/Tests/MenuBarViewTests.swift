@@ -36,6 +36,7 @@ final class MenuBarViewTests: XCTestCase {
         updateChecker: UpdateChecker? = nil,
         onNameSpeakers: (() -> Void)? = nil,
         onStopManualRecording: (() -> Void)? = nil,
+        onRecordMeeting: @escaping () -> Void = {},
         onRecordMicrophone: @escaping () -> Void = {},
         noMic: Bool = false,
         manualRecordingPendingOrActive: Bool = false,
@@ -46,6 +47,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: pipelineQueue ?? PipelineQueue(),
             updateChecker: updateChecker,
             onStartStop: {},
+            onRecordMeeting: onRecordMeeting,
             onRecordApp: {},
             onRecordMicrophone: onRecordMicrophone,
             noMic: noMic,
@@ -168,6 +170,30 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertNoThrow(try body.find(text: "Quit"))
     }
 
+    // MARK: - Record Meeting
+
+    func testRecordMeetingButtonShownWhenIdle() throws {
+        let sut = makeView(status: makeStatus(state: .idle))
+        let body = try sut.inspect()
+        XCTAssertNoThrow(try body.find(button: "Record Meeting"))
+    }
+
+    func testRecordMeetingButtonCallsCallback() throws {
+        var called = false
+        // swiftlint:disable:next trailing_closure
+        let sut = makeView(status: makeStatus(state: .idle), onRecordMeeting: { called = true })
+
+        try sut.inspect().find(button: "Record Meeting").tap()
+
+        XCTAssertTrue(called)
+    }
+
+    func testRecordMeetingButtonHiddenWhileRecording() throws {
+        let sut = makeView(status: makeStatus(state: .recording))
+        let body = try sut.inspect()
+        XCTAssertThrowsError(try body.find(button: "Record Meeting"))
+    }
+
     // MARK: - Record Microphone (issue #633)
 
     func testRecordMicrophoneButtonShownWhenIdle() throws {
@@ -232,6 +258,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: { called = true },
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -259,6 +286,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -286,6 +314,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -313,6 +342,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -340,6 +370,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -367,6 +398,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -430,6 +462,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: queue,
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -469,6 +502,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: queue,
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -495,6 +529,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -534,6 +569,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: queue,
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -572,6 +608,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: queue,
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -612,6 +649,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: queue,
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -652,6 +690,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: { called = true },
             onRecordMicrophone: {},
             noMic: false,
@@ -694,6 +733,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -771,6 +811,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: queue,
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,
@@ -912,6 +953,7 @@ final class MenuBarViewTests: XCTestCase {
             pipelineQueue: queue,
             updateChecker: nil,
             onStartStop: {},
+            onRecordMeeting: {},
             onRecordApp: {},
             onRecordMicrophone: {},
             noMic: false,

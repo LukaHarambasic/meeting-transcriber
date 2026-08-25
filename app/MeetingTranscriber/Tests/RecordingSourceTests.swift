@@ -18,6 +18,13 @@ final class RecordingSourceTests: XCTestCase {
         XCTAssertNil(RecordingSource.micOnly.appPID)
     }
 
+    func testSystemWideSourcesHaveNoTargetPIDEither() {
+        // Neither system-wide case names a single process — the tap is the
+        // whole output mixdown, not a PID.
+        XCTAssertNil(RecordingSource.systemAndMic.appPID)
+        XCTAssertNil(RecordingSource.systemOnly.appPID)
+    }
+
     // MARK: - Which channels the session opens
 
     func testCapturesAppAudioOnlyWhenThereIsATarget() {
@@ -26,16 +33,35 @@ final class RecordingSourceTests: XCTestCase {
         XCTAssertFalse(RecordingSource.micOnly.capturesAppAudio)
     }
 
+    /// The pair that motivated turning `capturesAppAudio` into an explicit
+    /// switch: both open a real CATap (the whole system mixdown), so deriving
+    /// this from `appPID != nil` — which is nil for both — would wrongly read
+    /// false and let a system recording start without the Screen Recording
+    /// gate that a tap actually needs.
+    func testSystemWideSourcesCaptureAppAudioDespiteHavingNoPID() {
+        XCTAssertTrue(RecordingSource.systemAndMic.capturesAppAudio)
+        XCTAssertTrue(RecordingSource.systemOnly.capturesAppAudio)
+        XCTAssertNil(RecordingSource.systemAndMic.appPID, "precondition: no PID, yet a tap is opened")
+    }
+
     func testCapturesMicrophoneForEverythingButTheAppOnlyCase() {
         XCTAssertTrue(RecordingSource.appAndMic(pid: 1).capturesMicrophone)
         XCTAssertFalse(RecordingSource.appOnly(pid: 1).capturesMicrophone)
         XCTAssertTrue(RecordingSource.micOnly.capturesMicrophone)
     }
 
+    func testSystemWideSourcesFollowTheSameMicRuleAsTheAppPair() {
+        XCTAssertTrue(RecordingSource.systemAndMic.capturesMicrophone)
+        XCTAssertFalse(RecordingSource.systemOnly.capturesMicrophone)
+    }
+
     func testEveryCaseCapturesSomething() {
         // The state this type exists to rule out: a source that opens neither
         // channel. If a future case forgets one, this is what catches it.
-        for source: RecordingSource in [.appAndMic(pid: 1), .appOnly(pid: 1), .micOnly] {
+        let allSources: [RecordingSource] = [
+            .appAndMic(pid: 1), .appOnly(pid: 1), .micOnly, .systemAndMic, .systemOnly,
+        ]
+        for source in allSources {
             XCTAssertTrue(
                 source.capturesAppAudio || source.capturesMicrophone,
                 "\(source) would record nothing",
@@ -52,12 +78,17 @@ final class RecordingSourceTests: XCTestCase {
         XCTAssertEqual(RecordingSource.appAndMic(pid: 1).capturedChannels, .micAndApp)
         XCTAssertEqual(RecordingSource.appOnly(pid: 1).capturedChannels, .appOnly)
         XCTAssertEqual(RecordingSource.micOnly.capturedChannels, .micOnly)
+        XCTAssertEqual(RecordingSource.systemAndMic.capturedChannels, .micAndApp)
+        XCTAssertEqual(RecordingSource.systemOnly.capturedChannels, .appOnly)
     }
 
     func testCapturedChannelsAgreesWithTheSourceItProjects() {
         // The projection and the source must answer the same two questions the
         // same way; they are read by different layers.
-        for source: RecordingSource in [.appAndMic(pid: 1), .appOnly(pid: 1), .micOnly] {
+        let allSources: [RecordingSource] = [
+            .appAndMic(pid: 1), .appOnly(pid: 1), .micOnly, .systemAndMic, .systemOnly,
+        ]
+        for source in allSources {
             XCTAssertEqual(source.capturedChannels.mic, source.capturesMicrophone, "\(source)")
             XCTAssertEqual(source.capturedChannels.app, source.capturesAppAudio, "\(source)")
         }
@@ -76,6 +107,11 @@ final class RecordingSourceTests: XCTestCase {
         XCTAssertEqual(RecordingSource.micOnly.logDescription, "microphone only")
     }
 
+    func testLogDescriptionNamesTheSystemWideSources() {
+        XCTAssertEqual(RecordingSource.systemAndMic.logDescription, "system audio")
+        XCTAssertEqual(RecordingSource.systemOnly.logDescription, "system audio only")
+    }
+
     // MARK: - Deriving the source from the user's settings
 
     func testAppRecordingKeepsTheMicrophoneByDefault() {
@@ -85,5 +121,13 @@ final class RecordingSourceTests: XCTestCase {
     func testAppRecordingDropsTheMicrophoneWhenTheUserAskedFor() {
         // "No Microphone (app audio only)" in Settings.
         XCTAssertEqual(RecordingSource.forApp(pid: 99, noMic: true), .appOnly(pid: 99))
+    }
+
+    func testSystemRecordingKeepsTheMicrophoneByDefault() {
+        XCTAssertEqual(RecordingSource.forSystem(noMic: false), .systemAndMic)
+    }
+
+    func testSystemRecordingDropsTheMicrophoneWhenTheUserAskedFor() {
+        XCTAssertEqual(RecordingSource.forSystem(noMic: true), .systemOnly)
     }
 }

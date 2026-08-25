@@ -9,7 +9,7 @@ import XCTest
 final class LiveCaptureSessionTests: XCTestCase {
     private func configuration(micDebugFault: DebugTapFault? = nil) -> AudioCaptureConfiguration {
         var config = AudioCaptureConfiguration(
-            pids: [], appOutputURL: nil, micOutputURL: nil, sampleRate: 48000, channels: 2,
+            tapTarget: .processes([]), appOutputURL: nil, micOutputURL: nil, sampleRate: 48000, channels: 2,
         )
         config.micDebugFault = micDebugFault
         return config
@@ -45,13 +45,13 @@ final class LiveCaptureSessionTests: XCTestCase {
         let app = URL(fileURLWithPath: "/tmp/stem_app16k_raw.tmp")
         let mic = URL(fileURLWithPath: "/tmp/stem_mic.wav")
         let asked = AudioCaptureConfiguration(
-            pids: [11, 22], appOutputURL: app, micOutputURL: mic,
+            tapTarget: .processes([11, 22]), appOutputURL: app, micOutputURL: mic,
             sampleRate: 44100, channels: 5, micDeviceUID: "device-uid", debugLogging: true,
         )
 
         let allowed = LiveCaptureSession.configurationForThisBuild(asked)
 
-        XCTAssertEqual(allowed.pids, [11, 22])
+        XCTAssertEqual(allowed.tapTarget, .processes([11, 22]))
         XCTAssertEqual(allowed.appOutputURL, app)
         XCTAssertEqual(allowed.micOutputURL, mic, "the two track URLs must not cross here either")
         XCTAssertEqual(allowed.sampleRate, 44100)

@@ -1347,6 +1347,30 @@
             XCTAssertEqual(payload?.title, "E2E Meeting")
         }
 
+        /// The system-wide source ("Record Meeting"): the decode carries
+        /// `.system` through to the control closure with no pid required —
+        /// unlike `.app`, the identity is fixed, not read off the payload.
+        func testV1RecordPOSTSystemSourceCarriesTargetToControl() async throws {
+            let received = PayloadBox()
+            let control: (RecordActionPayload) async -> RecordControlOutcome = { payload in
+                await received.store(payload)
+                return .changed
+            }
+            let base = try await startServer(recordControl: control)
+
+            var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
+            req.httpBody = Data(#"{"action":"start","source":"system"}"#.utf8)
+            let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
+
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            let payload = await received.read()
+            XCTAssertEqual(payload?.source, .system)
+            guard case .meeting = payload?.manualRecordingRequest else {
+                XCTFail("a system-source payload must map onto ManualRecordingRequest.meeting")
+                return
+            }
+        }
+
         /// An app source without a pid names nothing recordable; the route must
         /// answer 400 before the controller is involved, not fall back to a
         /// microphone recording the caller never asked for.

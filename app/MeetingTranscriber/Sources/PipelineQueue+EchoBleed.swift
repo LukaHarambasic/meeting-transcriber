@@ -103,7 +103,13 @@ extension PipelineQueue {
         // ten-second windows, and the E2E fixture produces four.
         let span = minutes == 1 ? "minute" : "minutes"
         let head = "Speaker output was picked up by the microphone in \(percent)% of the \(minutes) \(span) analysed."
-        let tail = "Remote speech may appear twice in the transcript. Using headphones avoids it."
+        // States the fact rather than prescribing headphones: a deliberate
+        // in-room loudspeaker meeting ("Record Meeting") can't act on that
+        // advice, and by the time this warning is read the duplicate lines it
+        // would have caused are already gone (see `EchoSegmentClassifier`'s
+        // header comment below for the removal itself).
+        let tail = "Remote speech also reached the microphone; duplicated transcript lines were removed " +
+            "automatically. Headphones avoid the bleed where the meeting allows them."
         // Third sentence because the consequence is otherwise invisible: naming
         // speakers on this recording will look like it worked and teach the app
         // nothing. Saying so here is honest — the quarantine follows from this
