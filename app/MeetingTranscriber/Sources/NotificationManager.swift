@@ -17,27 +17,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
 
     private(set) var isSetUp = false
 
-    // MARK: - Browser meeting consent prompt (issue #503)
-
-    /// Notification category + action identifiers for the "record this browser
-    /// meeting?" prompt. The category is registered in `setUp()`; the action
-    /// identifier the user taps maps to an answer via `consentAnswer(for:)`.
-    static let consentCategoryID = "BROWSER_MEETING_CONSENT"
-    static let recordActionID = "BROWSER_MEETING_RECORD"
-    static let ignoreActionID = "BROWSER_MEETING_IGNORE"
-    static let neverActionID = "BROWSER_MEETING_NEVER"
-    /// How long an unanswered prompt stays open before it resolves itself as
-    /// `.expired`. Five minutes, not one: it no longer blocks anything (the
-    /// watch loop kept polling since issue #543), and a minute was only ever
-    /// enough for someone sitting at the screen. Independent of the
-    /// `BrowserConsentPolicy` cooldowns, which govern the NEXT question.
-    static let consentPromptTimeout: TimeInterval = 300
-
-    /// Owns the consent prompt's register/resolve/timeout/race logic (unit-tested
-    /// in `ConsentPromptCoordinatorTests`); this class only wires the
-    /// UNUserNotificationCenter add + delegate callback to it.
-    private let consentCoordinator = ConsentPromptCoordinator(timeout: NotificationManager.consentPromptTimeout)
-
     #if !APPSTORE
         /// Bounded in-memory log of every notification posted through
         /// `notify(...)`, read by the dev-only debug RPC `/state.notifications`
@@ -77,7 +56,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         }
         isSetUp = true
         scheduler.setDelegate(self)
-        scheduler.setCategories([Self.makeConsentCategory()])
         scheduler.requestAuthorization()
     }
 
@@ -89,8 +67,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
             // is captured even in headless/test contexts where
             // `UNUserNotificationCenter` (which needs a real app bundle) is
             // absent. The `posted` flag preserves that distinction, and claims
-            // nothing beyond it — whether anything was rendered is the
-            // `NotificationVisibility` question, not this one.
+            // nothing beyond it — whether anything was actually rendered to the
+            // user is a separate question this flag does not answer.
             recentNotificationsLog.record(title: title, body: body, posted: deliverable)
         #endif
 
@@ -166,137 +144,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         if let content = Self.notificationContent(for: newState, status: status) {
             notify(title: content.title, body: content.body)
         }
-    }
-
-    // MARK: - Consent prompt (issue #503)
-
-    /// The "record this browser meeting?" category with Record / Ignore actions.
-    static func makeConsentCategory() -> UNNotificationCategory {
-        // No `.foreground` on either action: the delegate callback fires
-        // whether or not the app is activated, so the flag adds nothing except
-        // yanking the user out of the meeting they just agreed to record. It
-        // also activates whichever bundle LaunchServices considers canonical
-        // for the identifier, which on a machine with several copies installed
-        // is not necessarily the one that asked.
-        let record = UNNotificationAction(identifier: recordActionID, title: "Record", options: [])
-        let ignore = UNNotificationAction(identifier: ignoreActionID, title: "Ignore", options: [])
-        // Never is what makes process-open detection tolerable: any app holding
-        // a WebRTC assertion can reach this prompt, so the user needs a way to
-        // retire one permanently rather than declining it every ten minutes.
-        let never = UNNotificationAction(identifier: neverActionID, title: "Never for this app", options: [])
-        return UNNotificationCategory(
-            identifier: consentCategoryID,
-            actions: [record, ignore, never],
-            intentIdentifiers: [],
-            options: [],
-        )
-    }
-
-    /// Pure mapping from the tapped action to an answer. Only the explicit
-    /// Record action grants consent; Never is its own durable answer; Ignore, a
-    /// swipe-away dismiss, the default body tap and anything unrecognised all
-    /// decline, so an unknown identifier can never start a recording.
-    static func consentAnswer(for actionIdentifier: String) -> ConsentAnswer {
-        switch actionIdentifier {
-        case recordActionID: .granted
-        case neverActionID: .never
-        default: .declined
-        }
-    }
-
-    /// Post an actionable "record this browser meeting?" prompt and await the
-    /// user's choice (issue #503). Returns `.declined` when notifications can't
-    /// be delivered (no bundle / not set up) so we never record without a
-    /// visible prompt, `.expired` when nobody answered in time.
-    @MainActor
-    func askToRecord(title: String, body: String) async -> ConsentAnswer {
-        let deliverable = isSetUp && canDeliver()
-
-        #if !APPSTORE
-            // Same contract as `notify(...)`, and for the same reason: record the
-            // app's DECISION to prompt before the delivery guard, so an RPC
-            // consumer can tell "never asked" from "asked and could not show it".
-            // Without this the consent prompt was the one notification that left
-            // no trace, which is precisely how an invisible prompt could keep the
-            // browser e2e lane green while the feature was dead for users.
-            recentNotificationsLog.record(title: title, body: body, posted: deliverable)
-        #endif
-
-        guard deliverable else { return .declined }
-        let id = UUID().uuidString
-        let answer = await consentCoordinator.awaitDecision(id: id) { [self] in
-            postConsentNotification(id: id, title: title, body: body)
-        }
-        // However it resolved — tapped, expired, or answered over RPC — the
-        // question is settled, so the prompt must not stay in Notification
-        // Center asking about a meeting that has moved on.
-        scheduler.removeDelivered(withIdentifiers: [id])
-        return answer
-    }
-
-    /// How a posted notification would be presented, for
-    /// `BrowserConsentReadiness`. Read live rather than cached from
-    /// `requestAuthorization`: the user can change any of it in System Settings
-    /// long after launch, and that silently disables browser-meeting recording.
-    @MainActor
-    func notificationVisibility() async -> NotificationVisibility {
-        // Same guard as `setUp` and `notify`: without a real app bundle the
-        // notification centre raises NSInternalInconsistencyException.
-        guard canDeliver() else { return .unread }
-        return await scheduler.visibility()
-    }
-
-    /// Resolve a parked browser-consent prompt programmatically (the debug-RPC
-    /// `confirmBrowserConsent` hook, issue #503) — an automated e2e driver can't
-    /// click the macOS notification, so it answers the parked prompt through
-    /// this instead. Returns whether a prompt was actually waiting. Touches only
-    /// the lock-guarded coordinator, so it's safe from any thread with no
-    /// MainActor hop (unlike the scene actions).
-    func resolveBrowserConsent(granted: Bool) -> Bool {
-        consentCoordinator.resolvePending(granted: granted)
-    }
-
-    /// Post the actionable consent notification (the request-building is the pure
-    /// `makeNotificationContent`; only the `scheduler.add` is I/O). The decision
-    /// itself is driven by `didReceive` / the coordinator timeout, whichever
-    /// resolves first.
-    private func postConsentNotification(id: String, title: String, body: String) {
-        scheduler.add(UNNotificationRequest(
-            identifier: id,
-            content: Self.makeNotificationContent(
-                title: title,
-                body: body,
-                categoryID: Self.consentCategoryID,
-                // The one notification the app posts that asks a question with a
-                // deadline. At `.active` it is a banner: gone in seconds, and
-                // suppressed outright by any Focus mode, so it expires unseen and
-                // browser meetings silently never record. `.timeSensitive` is the
-                // only level that breaks through Focus, and it needs the matching
-                // entitlement to do so; see `NotificationUrgency.timeSensitive`.
-                urgency: .timeSensitive,
-            ),
-            trigger: nil,
-        ))
-    }
-
-    /// Resolve a parked consent prompt from a notification response's primitives.
-    /// The delegate callback unwraps the framework `UNNotificationResponse` (which
-    /// has no public initialiser) into these, so the id + grant mapping stays
-    /// unit-testable without constructing a real response.
-    func resolveConsent(responseIdentifier: String, actionIdentifier: String) {
-        consentCoordinator.resolve(
-            id: responseIdentifier,
-            answer: Self.consentAnswer(for: actionIdentifier),
-        )
-    }
-
-    // Handle a tapped consent action (or a dismiss) → resolve the prompt.
-    // swiftlint:disable:next async_without_await
-    func userNotificationCenter(_: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        resolveConsent(
-            responseIdentifier: response.notification.request.identifier,
-            actionIdentifier: response.actionIdentifier,
-        )
     }
 
     // Show notifications even when app is in foreground

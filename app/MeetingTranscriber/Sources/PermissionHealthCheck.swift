@@ -1,7 +1,5 @@
-// `@preconcurrency`: ApplicationServices AX globals + AVFoundation
-// types lack Sendable annotations — same gaps as Permissions.swift /
-// AudioMixer.swift; preemptively guarded.
-@preconcurrency import ApplicationServices
+// `@preconcurrency`: AVFoundation types lack Sendable annotations — same
+// gaps as Permissions.swift / AudioMixer.swift; preemptively guarded.
 import AudioTapLib
 @preconcurrency import AVFoundation
 import CoreGraphics
@@ -21,21 +19,18 @@ enum PermissionProblem: Equatable {
     case screenRecordingBroken
     case microphoneDenied
     case microphoneBroken
-    case accessibilityDenied
-    case accessibilityBroken
 
     var permissionName: String {
         switch self {
         case .screenRecordingDenied, .screenRecordingBroken: "Screen Recording"
         case .microphoneDenied, .microphoneBroken: "Microphone"
-        case .accessibilityDenied, .accessibilityBroken: "Accessibility"
         }
     }
 
     var isBroken: Bool {
         switch self {
-        case .screenRecordingBroken, .microphoneBroken, .accessibilityBroken: true
-        case .screenRecordingDenied, .microphoneDenied, .accessibilityDenied: false
+        case .screenRecordingBroken, .microphoneBroken: true
+        case .screenRecordingDenied, .microphoneDenied: false
         }
     }
 
@@ -51,7 +46,6 @@ enum PermissionProblem: Equatable {
         let key = switch self {
         case .screenRecordingDenied, .screenRecordingBroken: "screen-recording"
         case .microphoneDenied, .microphoneBroken: "microphone"
-        case .accessibilityDenied, .accessibilityBroken: "accessibility"
         }
         return "\(key)=\(isBroken ? "broken" : "denied")"
     }
@@ -62,15 +56,6 @@ enum PermissionProblem: Equatable {
     /// recording opens no mic file at all (`DualSourceRecorder.start`), so the
     /// microphone grant it never asks for cannot block it; a microphone-only
     /// recording opens no process tap, so Screen Recording cannot block it.
-    ///
-    /// Accessibility never blocks: its only consumer is `ParticipantReader` (Teams
-    /// participant names, read in `handleMeeting`), which a recording does not need.
-    /// Settings labels it optional too, via `PermissionRow(optional: true)`, but that
-    /// row is not independent corroboration: its wording promises a mute detection
-    /// that does not exist, since mute handling is sample-level in `AudioMixer` and
-    /// level-based in `ChannelHealthController`, neither of which touches
-    /// Accessibility. Nothing links the row to this switch either, so flipping one
-    /// leaves them disagreeing with no compile error and no failing test.
     ///
     /// Screen Recording keeps blocking every recording that taps a process, even
     /// though it is only *one* of two sufficient grants for the app-audio tap, the
@@ -100,7 +85,6 @@ enum PermissionProblem: Equatable {
         switch self {
         case .screenRecordingDenied, .screenRecordingBroken: source.capturesAppAudio
         case .microphoneDenied, .microphoneBroken: source.capturesMicrophone
-        case .accessibilityDenied, .accessibilityBroken: false
         }
     }
 }
@@ -108,17 +92,6 @@ enum PermissionProblem: Equatable {
 struct HealthCheckResult: Equatable {
     let screenRecording: PermissionStatus
     let microphone: PermissionStatus
-    let accessibility: PermissionStatus
-
-    init(
-        screenRecording: PermissionStatus,
-        microphone: PermissionStatus,
-        accessibility: PermissionStatus = .healthy,
-    ) {
-        self.screenRecording = screenRecording
-        self.microphone = microphone
-        self.accessibility = accessibility
-    }
 
     var problems: [PermissionProblem] {
         var result: [PermissionProblem] = []
@@ -130,11 +103,6 @@ struct HealthCheckResult: Equatable {
         switch microphone {
         case .denied: result.append(.microphoneDenied)
         case .broken: result.append(.microphoneBroken)
-        default: break
-        }
-        switch accessibility {
-        case .denied: result.append(.accessibilityDenied)
-        case .broken: result.append(.accessibilityBroken)
         default: break
         }
         return result
@@ -425,67 +393,22 @@ enum PermissionHealthCheck {
         return r
     }
 
-    // MARK: - Accessibility (pure, testable)
-
-    /// Pure decision function for Accessibility permission state.
-    ///
-    /// - `trusted`: whether `AXIsProcessTrusted()` returns true.
-    /// - `probeSucceeds`: whether a concrete AX API call (e.g. reading the focused app of
-    ///   `AXUIElementCreateSystemWide`) returns `.success`.
-    static func checkAccessibility(
-        trusted: Bool,
-        probeSucceeds: Bool,
-    ) -> PermissionStatus {
-        if !trusted { return .denied }
-        return probeSucceeds ? .healthy : .broken
-    }
-
-    /// Probes the Accessibility API with a lightweight system-wide call.
-    /// Returns true if the call succeeds (and we either get a valid attribute or `noValue`).
-    static func probeAccessibility() -> Bool {
-        let systemWide = AXUIElementCreateSystemWide()
-        var value: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(
-            systemWide,
-            kAXFocusedApplicationAttribute as CFString,
-            &value,
-        )
-        // .success: got the focused app. .noValue: no focused app right now, but the API worked.
-        // Any other error (e.g. .cannotComplete, .apiDisabled) indicates AX isn't actually granted.
-        return err == .success || err == .noValue
-    }
-
-    static func checkAccessibilityLive() -> PermissionStatus {
-        let trusted = AXIsProcessTrusted()
-        if !trusted {
-            debugLog("checkAccessibilityLive: trusted=false → denied")
-            return .denied
-        }
-        let probe = probeAccessibility()
-        let r = checkAccessibility(trusted: trusted, probeSucceeds: probe)
-        debugLog("checkAccessibilityLive: trusted=true probe=\(probe) → \(r)")
-        return r
-    }
-
     // MARK: - Overall Health
 
     static func overallHealth(
         screenRecording: PermissionStatus,
         microphone: PermissionStatus,
-        accessibility: PermissionStatus = .healthy,
     ) -> HealthCheckResult {
         HealthCheckResult(
             screenRecording: screenRecording,
             microphone: microphone,
-            accessibility: accessibility,
         )
     }
 
     static func runLive() async -> HealthCheckResult {
         let sr = checkScreenRecordingLive()
         let mic = await checkMicrophoneLive()
-        let ax = checkAccessibilityLive()
-        let result = overallHealth(screenRecording: sr, microphone: mic, accessibility: ax)
+        let result = overallHealth(screenRecording: sr, microphone: mic)
         if !result.isHealthy {
             logger.warning("Permission health check failed: \(result.logSummary, privacy: .public)")
         }

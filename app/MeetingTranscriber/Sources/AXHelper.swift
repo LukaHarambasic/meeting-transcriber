@@ -5,7 +5,9 @@ import os.log
 
 private let logger = Logger(subsystem: AppPaths.logSubsystem, category: "AXHelper")
 
-/// Shared Accessibility API helpers used by ParticipantReader.
+/// Shared Accessibility API helpers used by the debug RPC's self-pid UI-tree
+/// inspection (`DebugRPCServer+AXElement` and friends). Self-inspection is
+/// TCC-exempt, so this needs no Accessibility grant.
 enum AXHelper {
     /// Read a single AX attribute value from an element.
     /// Logs a warning if the call fails with a status other than `noValue`

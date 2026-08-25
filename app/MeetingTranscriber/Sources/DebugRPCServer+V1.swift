@@ -72,8 +72,6 @@
         /// - `GET  /v1/jobs/<id>/naming` — pending speaker-naming choice
         /// - `POST /v1/jobs/<id>/naming` — confirm speaker names `{mapping}`
         /// - `POST /v1/jobs/<id>/naming/skip` — skip naming for one job
-        /// - `GET  /v1/watch` — watching status
-        /// - `POST /v1/watch` — start/stop/toggle watching `{action}`
         /// - `GET  /v1/record` — manual-recording status (microphone-scoped)
         /// - `POST /v1/record` — start/stop/toggle a manual recording `{action}`,
         ///   optionally scoped to an app capture via `{source: "app", pid, appName, title}`
@@ -125,24 +123,23 @@
         /// reads the same set to decide what to hand to `routeV1`, so a third
         /// resource is added in one place: splitting the two lists is how a new
         /// resource ends up answering 404 with its handler sitting right there.
-        static let controlResourcePaths: Set<String> = ["/v1/watch", "/v1/record"]
+        static let controlResourcePaths: Set<String> = ["/v1/record"]
 
-        /// The two lifecycle resources — watching and microphone recording —
-        /// which share a shape: GET reads the status, POST applies an action and
-        /// answers with the state it settled into. Nil when `path` is neither, so
-        /// the caller falls through to the `/v1/jobs` routing below.
+        /// The microphone-recording lifecycle resource: GET reads the status,
+        /// POST applies an action and answers with the state it settled into.
+        /// Nil when `path` doesn't match, so the caller falls through to the
+        /// `/v1/jobs` routing below. Kept as a set (rather than a single string
+        /// literal) so a new lifecycle resource has one place to register.
         ///
         /// Matched here, before that routing splits the path into components and
-        /// assumes it starts `["v1", "jobs"]`. Neither takes an
-        /// `Idempotency-Key`: both are already idempotent, and that header exists
-        /// on this API only to stop duplicate *job creation*.
+        /// assumes it starts `["v1", "jobs"]`. Doesn't take an
+        /// `Idempotency-Key`: the action is already idempotent, and that header
+        /// exists on this API only to stop duplicate *job creation*.
         private func controlResourceResponse(
             _ request: HTTPRequest, path: String,
         ) async -> HTTPResponse? {
             guard Self.controlResourcePaths.contains(path) else { return nil }
             switch (path, request.method) {
-            case ("/v1/watch", "GET"): return jsonResponse(watchStatus())
-            case ("/v1/watch", "POST"): return await watchControlResponse(body: request.body)
             case ("/v1/record", "GET"): return jsonResponse(recordStatus())
             case ("/v1/record", "POST"): return await recordControlResponse(body: request.body)
             default: return HTTPResponse.notFound()
@@ -172,40 +169,20 @@
             jobStatus(jobID) != nil ? HTTPResponse.conflict() : HTTPResponse.notFound()
         }
 
-        // MARK: - /v1/watch
-
-        /// Apply a watch action and report the state it settled into.
-        ///
-        /// 409 for `.blocked` because `toggleWatching` silently refuses while a
-        /// manual recording owns the loop; a refusal that looks like success is
-        /// exactly the failure mode a remote key must not have. 503 for
-        /// `.failed` — the request was accepted but the state did not converge,
-        /// which is a different problem from being told no.
-        private func watchControlResponse(body: Data) async -> HTTPResponse {
-            guard let payload = try? JSONDecoder().decode(WatchActionPayload.self, from: body) else {
-                return HTTPResponse.badRequest()
-            }
-            switch await watchControl(payload.action) {
-            case .changed, .unchanged: return jsonResponse(watchStatus())
-            case .blocked: return jsonResponse(watchStatus(), status: 409, reason: "Conflict")
-            case .failed: return jsonResponse(watchStatus(), status: 503, reason: "Service Unavailable")
-            }
-        }
-
         // MARK: - /v1/record
 
         /// Apply a record action and report the state it settled into.
         ///
-        /// The extra code over `/v1/watch` is 412. A `start` that cannot capture
-        /// anything — "No Microphone" is set, or the microphone permission is
-        /// denied or broken — is not a transient failure to retry (503) and not
-        /// somebody else holding the loop (409). It stays refused until a switch
-        /// is flipped, and the body says which one: `noMic` and
-        /// `microphoneHealthy` tell the two apart.
-        ///
-        /// The contrast with `/v1/watch` is deliberate: a denied microphone
-        /// answers `200` there, because app audio still records without it. Here
-        /// nothing would, so 200 would be a lie.
+        /// 409 for `.blocked`: something else already owns the recording, and a
+        /// refusal that looks like success is exactly the failure mode a remote
+        /// key must not have. 503 for `.failed`: the request was accepted but the
+        /// state did not converge, a different problem from being told no. 412
+        /// for `.refused`: a `start` that cannot capture anything — "No
+        /// Microphone" is set, or the microphone permission is denied or broken
+        /// — is not a transient failure to retry (503) and not somebody else
+        /// holding the loop (409). It stays refused until a switch is flipped,
+        /// and the body says which one: `noMic` and `microphoneHealthy` tell the
+        /// two apart.
         private func recordControlResponse(body: Data) async -> HTTPResponse {
             guard let payload = try? JSONDecoder().decode(RecordActionPayload.self, from: body),
                   payload.manualRecordingRequest != nil // app source without a pid names nothing

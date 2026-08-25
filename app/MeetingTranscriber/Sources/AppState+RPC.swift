@@ -1,7 +1,6 @@
 #if !APPSTORE
     import AppKit
     import Foundation
-    import UserNotifications
 
     extension RPCStateSnapshot.WindowInfo {
         /// Project an `NSWindow`'s pinning-relevant properties for the RPC
@@ -28,51 +27,6 @@
             case .denied: "denied"
             case .broken: "broken"
             case .notDetermined: "notDetermined"
-            }
-        }
-    }
-
-    extension UNAuthorizationStatus {
-        /// Stable wire string for the same snapshot. Hand-written rather than
-        /// derived from `rawValue` so a driver script asserts on a name that
-        /// cannot silently shift if Apple renumbers the enum. Lives here beside
-        /// its twin above, and inside this file's `#if !APPSTORE`, because the
-        /// snapshot is its only consumer.
-        var rpcValue: String {
-            switch self {
-            case .notDetermined: "notDetermined"
-            case .denied: "denied"
-            case .authorized: "authorized"
-            case .provisional: "provisional"
-            @unknown default: "unknown"
-            }
-        }
-    }
-
-    extension UNNotificationSetting {
-        /// Wire string for the presentation settings that decide whether the
-        /// consent prompt is seen. Hand-written for the same reason as the
-        /// authorisation table above.
-        var rpcValue: String {
-            switch self {
-            case .notSupported: "notSupported"
-            case .disabled: "disabled"
-            case .enabled: "enabled"
-            @unknown default: "unknown"
-            }
-        }
-    }
-
-    extension UNAlertStyle {
-        /// Wire string for the alert style. "none" is the interesting one: it
-        /// means Notification Center only, no banner, which is how an authorised
-        /// app can still never show a prompt with a deadline.
-        var rpcValue: String {
-            switch self {
-            case .none: "none"
-            case .banner: "banner"
-            case .alert: "alert"
-            @unknown default: "unknown"
             }
         }
     }
@@ -129,8 +83,6 @@
                 channelHealth: channelHealthSnapshot(),
                 permissionHealth: permissionHealthSnapshot(),
                 liveCaptions: liveCaptionsSnapshot(),
-                watchState: watching.watchLoop?.state.rawValue,
-                pendingConsentApp: watching.watchLoop?.pendingConsentApp,
                 isManualRecording: watching.isManualRecording,
                 notifications: notificationsSnapshot(),
                 // Built inside AppSettings (single-hop `self.` reads) to stay
@@ -142,62 +94,18 @@
             )
         }
 
-        /// Small, stable projection of the watching lifecycle for `/v1/watch`.
-        ///
-        /// Kept separate from `rpcStateSnapshot` on purpose: that snapshot is the
-        /// debug surface and is free to change shape, while this one is polled on
-        /// an interval by third-party controllers and carries a compatibility
-        /// promise. Locals are bound first (rather than reading the two-hop
-        /// `watching.watchLoop.…` `@Observable` chain inline) to keep the
-        /// memberwise init inside the type-check budget — see `rpcQueueStatus`.
-        func watchStatusDTO() -> WatchStatusDTO {
-            let loop = watching.watchLoop
-            let badge = currentBadge.rawValue
-            // nil means the probe has not run, which is not a permission
-            // problem. `BadgeKind.compute` treats it the same way, and the
-            // badge and this field must not disagree.
-            let healthy = permissions.health?.isHealthy != false
-            return WatchStatusDTO(
-                watching: watching.isWatching,
-                state: loop?.state.rawValue,
-                badge: badge,
-                manualRecording: watching.isManualRecording,
-                pendingConsentApp: loop?.pendingConsentApp,
-                permissionsHealthy: healthy,
-            )
-        }
-
-        /// The two `/v1/watch` seams, bundled so `buildDebugRPCServer` stays a
-        /// flat wiring list. Control is `async` because the start awaits the mic
-        /// gate before the loop exists — reporting a snapshot taken before that
-        /// settles would hand a remote key a stale answer to the press it just
-        /// made. Status is this small dedicated projection rather than `/state`,
-        /// which a polling controller must not be pinned to.
-        func watchRPCClosures() -> (
-            status: () -> WatchStatusDTO,
-            control: (WatchAction) async -> WatchControlOutcome,
-        ) {
-            let status: () -> WatchStatusDTO = { [weak self] in
-                self?.watchStatusDTO() ?? .notWatching
-            }
-            let control: (WatchAction) async -> WatchControlOutcome = { [weak self] action in
-                guard let self else { return .failed }
-                return await watching.applyWatchAction(action)
-            }
-            return (status, control)
-        }
-
         /// Small, stable projection of the microphone-recording lifecycle for
-        /// `/v1/record`, the sibling of `watchStatusDTO()` and kept separate from
-        /// `rpcStateSnapshot` for the same reason.
+        /// `/v1/record`. Kept separate from `rpcStateSnapshot` on purpose: that
+        /// snapshot is the debug surface and is free to change shape, while this
+        /// one is polled on an interval by third-party controllers and carries a
+        /// compatibility promise.
         func recordStatusDTO() -> RecordStatusDTO {
             let loop = watching.watchLoop
             // Asked through `recordingBlockers`, the same function the gate
             // inside `WatchLoop` consults, so this cannot come to a different
             // verdict than the refusal a POST would produce. nil means the probe
             // has not run, which is not a permission problem — `BadgeKind.compute`
-            // and `WatchStatusDTO.permissionsHealthy` read an unknown result the
-            // same way.
+            // reads an unknown result the same way.
             let micHealthy = permissions.health?.recordingBlockers(for: .micOnly).isEmpty ?? true
             // `.systemOnly` isolates the Screen Recording arm the same way
             // `.micOnly` isolates the microphone's: it is a source shape whose
@@ -215,10 +123,9 @@
             )
         }
 
-        /// The two `/v1/record` seams, bundled like `watchRPCClosures` so
-        /// `buildDebugRPCServer` stays a flat wiring list. Control is `async`
-        /// because the start awaits the mic gate, the queue and the loop before
-        /// there is anything true to report.
+        /// The two `/v1/record` seams, bundled so `buildDebugRPCServer` stays a
+        /// flat wiring list. Control is `async` because the start awaits the mic
+        /// gate, the queue and the loop before there is anything true to report.
         func recordRPCClosures() -> (
             status: () -> RecordStatusDTO,
             control: (RecordActionPayload) async -> RecordControlOutcome,
@@ -242,7 +149,7 @@
         }
 
         /// The three per-job speaker-naming seams, bundled for the same reason as
-        /// `watchRPCClosures`: `buildDebugRPCServer` is a flat wiring list, and
+        /// `recordRPCClosures`: `buildDebugRPCServer` is a flat wiring list, and
         /// grouping the closures that belong to one route family keeps it one.
         func namingRPCClosures() -> (
             status: (UUID) -> NamingStatusDTO?,
@@ -337,20 +244,11 @@
         /// check completes → `.unknown`. Extracted (like `channelHealthSnapshot`)
         /// to keep `rpcStateSnapshot`'s literal under the type-check budget.
         private func permissionHealthSnapshot() -> RPCStateSnapshot.PermissionHealth {
-            // Per-field fallbacks rather than an early `.unknown` return: the TCC
-            // probe and the notification query complete independently, so one
-            // being unfinished must not blank the other.
             let health = permissions.health
-            let visibility = permissions.notificationVisibility
             return RPCStateSnapshot.PermissionHealth(
                 screenRecording: health?.screenRecording.rpcValue ?? "unknown",
                 microphone: health?.microphone.rpcValue ?? "unknown",
-                accessibility: health?.accessibility.rpcValue ?? "unknown",
                 isHealthy: health?.isHealthy ?? false,
-                notifications: visibility?.authorization.rpcValue ?? "unknown",
-                notificationsAlertStyle: visibility?.alertStyle.rpcValue ?? "unknown",
-                notificationsTimeSensitive: visibility?.timeSensitive.rpcValue ?? "unknown",
-                notificationsScheduledDelivery: visibility?.scheduledDelivery.rpcValue ?? "unknown",
             )
         }
 

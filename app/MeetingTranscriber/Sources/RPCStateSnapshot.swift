@@ -28,22 +28,9 @@
         /// chain produced text without scraping the OSLog or screenshotting
         /// the overlay panel.
         let liveCaptions: LiveCaptions
-        /// Current watch-loop state (`WatchLoop.State` raw value: "idle",
-        /// "watching", "recording", "error"), nil when no watch loop exists.
-        /// Lets driver scripts gate a measurement window on
-        /// `watchState == "recording"` when no caption signal is available
-        /// (live transcription off — the default user profile).
-        let watchState: String?
-        /// The app whose browser-meeting consent prompt is currently parked,
-        /// nil when no question is open. `watchState` stays "watching" while a
-        /// prompt waits, so this is the only wire signal that tells "detected,
-        /// waiting for an answer" from "nothing detected" — the pair that was
-        /// indistinguishable from outside when a prompt was invisible.
-        let pendingConsentApp: String?
-        /// True while the active recording is a manual (app-picker) recording
-        /// rather than an auto-detected meeting. `watchState` reads "recording"
-        /// for both, so this is the only wire signal that distinguishes the
-        /// manual-recording path — letting a driver assert it took that path.
+        /// True while the active recording is a manual (app-picker) recording.
+        /// Lets a driver assert it took the manual-recording path rather than
+        /// something else landing in `.recording` state.
         let isManualRecording: Bool
         /// Recently-posted macOS notifications (capped ring buffer, oldest
         /// dropped), chronological — newest last. E2E drivers poll this to
@@ -168,53 +155,17 @@
         struct PermissionHealth: Codable {
             let screenRecording: String
             let microphone: String
-            let accessibility: String
             /// Mirror of `HealthCheckResult.isHealthy` — true only when every
             /// permission is healthy. Lets drivers assert the aggregate without
-            /// re-deriving it from the three strings.
+            /// re-deriving it from the two strings.
             let isHealthy: Bool
-
-            /// Notification authorisation ("authorized", "denied",
-            /// "notDetermined", "provisional", "unknown"). `.ephemeral` is iOS-only
-            /// and cannot occur here, so it falls through to "unknown".
-            ///
-            /// Deliberately outside `isHealthy`: it is not a TCC permission and
-            /// only matters for browser-meeting consent, which is opt-in. It is
-            /// here because the browser e2e lane answers consent over RPC, which
-            /// resolves the parked prompt whether or not a notification was ever
-            /// shown — so without this the lane could pass on a runner where the
-            /// feature is dead for a real user.
-            let notifications: String
-
-            /// How an alert would be presented ("none", "banner", "alert",
-            /// "unknown"). "none" means no banner appears, so the consent prompt
-            /// expires in Notification Center unseen even though authorisation
-            /// reads as "authorized" — the state the original field report came
-            /// from, and invisible to the line above on its own.
-            let notificationsAlertStyle: String
-
-            /// Whether the app may post time-sensitive notifications ("enabled",
-            /// "disabled", "notSupported", "unknown"). This is what carries the
-            /// consent prompt through Focus; "notSupported" means the build has
-            /// no time-sensitive entitlement rather than a user setting.
-            let notificationsTimeSensitive: String
-
-            /// Whether delivery is batched into the scheduled summary. Diagnostic
-            /// only: time-sensitive bypasses the summary, so this changes no
-            /// verdict on its own.
-            let notificationsScheduledDelivery: String
 
             /// Pre-check placeholder: the health check runs asynchronously at
             /// launch, so a snapshot taken before it completes reports "unknown".
             static let unknown = Self(
                 screenRecording: "unknown",
                 microphone: "unknown",
-                accessibility: "unknown",
                 isHealthy: false,
-                notifications: "unknown",
-                notificationsAlertStyle: "unknown",
-                notificationsTimeSensitive: "unknown",
-                notificationsScheduledDelivery: "unknown",
             )
         }
 
@@ -225,11 +176,9 @@
             let postedAt: String
             /// Whether the app handed it to `UNUserNotificationCenter`;
             /// `false` means it only *decided* to notify (headless context,
-            /// setup not run).
-            ///
-            /// Not a claim that anything was shown — macOS decides that, and
-            /// `permissionHealth.notifications*` carries the settings that
-            /// answer it. An assertion about a user-VISIBLE warning needs both.
+            /// setup not run). Not a claim that anything was shown — macOS's
+            /// own notification settings decide that, which this snapshot
+            /// does not carry.
             let posted: Bool
         }
 
@@ -281,7 +230,6 @@
         /// NEVER carries secrets: the OpenAI API key and any other
         /// Keychain-backed value are deliberately excluded.
         struct Settings: Codable {
-            let detection: Detection
             let recording: Recording
             let transcription: Transcription
             let diarization: Diarization
@@ -290,21 +238,7 @@
             let diagnostics: Diagnostics
             let updates: Updates
 
-            struct Detection: Codable {
-                let watchTeams: Bool
-                let watchZoom: Bool
-                let watchWebex: Bool
-                let autoWatch: Bool
-                let pollIntervalSeconds: Double
-
-                static let empty = Self(
-                    watchTeams: false, watchZoom: false, watchWebex: false,
-                    autoWatch: false, pollIntervalSeconds: 0,
-                )
-            }
-
             struct Recording: Codable {
-                let endGraceSeconds: Double
                 let noMic: Bool
                 let recordOnly: Bool
                 /// CoreAudio device UID; empty string = system default.
@@ -315,7 +249,7 @@
                 let asymmetricSilenceWarningSeconds: Double
 
                 static let empty = Self(
-                    endGraceSeconds: 0, noMic: false, recordOnly: false,
+                    noMic: false, recordOnly: false,
                     micDeviceUID: "", micName: "", perChannelIndicatorEnabled: false,
                     liveTranscriptionEnabled: false, asymmetricSilenceWarningSeconds: 0,
                 )
@@ -406,7 +340,7 @@
             /// Placeholder for snapshots built without a live `AppSettings`
             /// (test fixtures, `RPCStateSnapshot.empty`).
             static let empty = Self(
-                detection: .empty, recording: .empty, transcription: .empty,
+                recording: .empty, transcription: .empty,
                 diarization: .empty, protocolGeneration: .empty, output: .empty,
                 diagnostics: .empty, updates: .empty,
             )
@@ -421,8 +355,6 @@
             channelHealth: ChannelHealth = .inactive,
             permissionHealth: PermissionHealth = .unknown,
             liveCaptions: LiveCaptions = .empty,
-            watchState: String? = nil,
-            pendingConsentApp: String? = nil,
             isManualRecording: Bool = false,
             notifications: [Notification] = [],
             settings: Settings = .empty,
@@ -438,8 +370,6 @@
             self.channelHealth = channelHealth
             self.permissionHealth = permissionHealth
             self.liveCaptions = liveCaptions
-            self.watchState = watchState
-            self.pendingConsentApp = pendingConsentApp
             self.isManualRecording = isManualRecording
             self.notifications = notifications
             self.settings = settings

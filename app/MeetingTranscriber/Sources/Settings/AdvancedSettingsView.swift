@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import AudioTapLib
 import AVFoundation
 import os.log
@@ -10,7 +9,6 @@ private let logger = Logger(subsystem: AppPaths.logSubsystem, category: "Advance
 private enum PrivacyPane: String {
     case screenCapture = "Privacy_ScreenCapture"
     case microphone = "Privacy_Microphone"
-    case accessibility = "Privacy_Accessibility"
 
     var url: String {
         "x-apple.systempreferences:com.apple.preference.security?\(rawValue)"
@@ -22,7 +20,6 @@ struct AdvancedSettingsView: View {
 
     @State private var micPermission: AVAuthorizationStatus = .notDetermined
     @State private var screenRecordingOK = false
-    @State private var accessibilityOK = false
     @State private var lastExportFile: String?
     @State private var lastExportError: String?
     /// True while a `DiagnosticExporter.export` call is running off-main.
@@ -50,14 +47,6 @@ struct AdvancedSettingsView: View {
                     warning: micPermission == .notDetermined,
                     help: "System Settings → Privacy & Security → Microphone → enable Meeting Transcriber",
                     settingsURL: PrivacyPane.microphone.url,
-                )
-                PermissionRow(
-                    label: "Accessibility",
-                    detail: "Optional — enables mute detection and meeting naming",
-                    granted: accessibilityOK,
-                    optional: true,
-                    help: "System Settings → Privacy & Security → Accessibility → enable Meeting Transcriber",
-                    settingsURL: PrivacyPane.accessibility.url,
                 )
 
                 Button("Refresh") {
@@ -115,8 +104,8 @@ struct AdvancedSettingsView: View {
                     Text(
                         "Exposes the local automation API + pipeline state on"
                             + " 127.0.0.1:9876 (POST /v1/transcribe, /v1/jobs, and"
-                            + " /v1/watch to start/stop watching from a hotkey or"
-                            + " Stream Deck; also `mt-cli`). Localhost-only,"
+                            + " /v1/record to start/stop a recording from a hotkey"
+                            + " or Stream Deck; also `mt-cli`). Localhost-only,"
                             + " bearer-token auth. Off by default; enable for"
                             + " headless automation or shell-driven inspection.",
                     )
@@ -176,7 +165,6 @@ struct AdvancedSettingsView: View {
     private func refreshPermissions() {
         micPermission = AVCaptureDevice.authorizationStatus(for: .audio)
         screenRecordingOK = Permissions.checkScreenRecording()
-        accessibilityOK = AXIsProcessTrusted()
     }
 
     private func exportDiagnostics() {

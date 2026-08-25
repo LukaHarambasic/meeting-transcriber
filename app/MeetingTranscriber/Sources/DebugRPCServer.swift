@@ -67,11 +67,6 @@
         private let snapshot: () -> RPCStateSnapshot
         private let speakerActions: SpeakerDBActions
         private let skipNaming: () -> Void
-        /// Resolves a parked browser-meeting consent prompt (issue #503) with the
-        /// posted `granted` value; returns whether a prompt was actually waiting.
-        /// Lets the e2e driver answer the ask-before-recording prompt without a
-        /// clickable macOS notification.
-        private let confirmBrowserConsent: (Bool) -> Bool
         /// Enqueues a previously-recorded file into the pipeline — same path
         /// `processAudioFiles` (NSOpenPanel) takes. Returns `false` if the
         /// caller's path is missing or doesn't exist on disk; the RPC layer
@@ -88,8 +83,6 @@
         let confirmNaming: (UUID, [String: String]) -> Bool // POST .../naming
         let skipJobNaming: (UUID) -> Bool // POST .../naming/skip
         let transcribe: (URL, Double) async -> BlockingTranscribeResult // POST /v1/transcribe
-        let watchStatus: () -> WatchStatusDTO // GET /v1/watch
-        let watchControl: (WatchAction) async -> WatchControlOutcome // POST /v1/watch
         let recordStatus: () -> RecordStatusDTO // GET /v1/record
         let recordControl: (RecordActionPayload) async -> RecordControlOutcome // POST /v1/record
         var idempotency = IdempotencyStore() // Idempotency-Key -> job IDs; internal for the +V1 extension
@@ -109,7 +102,6 @@
             snapshot: @escaping () -> RPCStateSnapshot,
             speakerActions: SpeakerDBActions = .noop,
             skipNaming: @escaping () -> Void = {},
-            confirmBrowserConsent: @escaping (Bool) -> Bool = { _ in false },
             enqueueFile: @escaping (URL) -> Bool = { _ in false },
             enqueueFiles: @escaping ([URL]) -> Int = { _ in 0 },
             enqueueReturningIDs: @escaping ([URL]) -> [UUID] = { _ in [] },
@@ -118,8 +110,6 @@
             confirmNaming: @escaping (UUID, [String: String]) -> Bool = { _, _ in false },
             skipJobNaming: @escaping (UUID) -> Bool = { _ in false },
             transcribe: @escaping (URL, Double) async -> BlockingTranscribeResult = { _, _ in .noFile },
-            watchStatus: @escaping () -> WatchStatusDTO = { .notWatching },
-            watchControl: @escaping (WatchAction) async -> WatchControlOutcome = { _ in .failed },
             recordStatus: @escaping () -> RecordStatusDTO = { .notRecording },
             recordControl: @escaping (RecordActionPayload) async -> RecordControlOutcome = { _ in .failed },
         ) {
@@ -128,7 +118,6 @@
             self.snapshot = snapshot
             self.speakerActions = speakerActions
             self.skipNaming = skipNaming
-            self.confirmBrowserConsent = confirmBrowserConsent
             self.enqueueFile = enqueueFile
             self.enqueueFiles = enqueueFiles
             self.enqueueReturningIDs = enqueueReturningIDs
@@ -137,8 +126,6 @@
             self.confirmNaming = confirmNaming
             self.skipJobNaming = skipJobNaming
             self.transcribe = transcribe
-            self.watchStatus = watchStatus
-            self.watchControl = watchControl
             self.recordStatus = recordStatus
             self.recordControl = recordControl
         }
@@ -383,9 +370,6 @@
                 skipNaming()
                 return HTTPResponse.ok()
 
-            case ("POST", "/action/confirmBrowserConsent"):
-                return routeConfirmBrowserConsent(body: request.body)
-
             case ("POST", "/action/enqueueFile"):
                 // Enqueues a previously-recorded audio file into the pipeline
                 // — the same code path NSOpenPanel hits via "Open from
@@ -428,23 +412,6 @@
             default:
                 return HTTPResponse.notFound()
             }
-        }
-
-        /// Resolve a parked browser-meeting consent prompt (issue #503) without a
-        /// clickable macOS notification — the e2e driver posts `{"granted":bool}`.
-        /// Threading: unlike the scene actions (openSettings etc.) which hop to
-        /// the main actor via `Notification.Name`, this only touches the
-        /// lock-guarded `ConsentPromptCoordinator`, so it resolves inline — don't
-        /// "unify" it onto the main-actor path. 400 on undecodable body;
-        /// `{"resolved":true}` if a prompt was waiting, `{"resolved":false}`
-        /// (no-op) if none was, so the driver can poll until true.
-        private func routeConfirmBrowserConsent(body: Data) -> HTTPResponse {
-            guard let p = try? JSONDecoder().decode(ConsentPayload.self, from: body)
-            else { return HTTPResponse.badRequest() }
-            let resolved = confirmBrowserConsent(p.granted)
-            return HTTPResponse.ok(
-                body: Data(#"{"resolved":\#(resolved)}"#.utf8), contentType: "application/json",
-            )
         }
 
         // MARK: - Speaker DB action helpers
@@ -503,10 +470,6 @@
 
         private struct EnqueueFilePayload: Decodable {
             let path: String
-        }
-
-        private struct ConsentPayload: Decodable {
-            let granted: Bool
         }
 
         /// Map the action outcome to an HTTP response. `notFound` → 404,

@@ -18,7 +18,6 @@
         /// screenshots, so home-directory paths are acceptable; secrets are not.
         func rpcSettingsSnapshot() -> RPCStateSnapshot.Settings {
             RPCStateSnapshot.Settings(
-                detection: rpcDetectionSettings(),
                 recording: rpcRecordingSettings(),
                 transcription: rpcTranscriptionSettings(),
                 diarization: rpcDiarizationSettings(),
@@ -29,19 +28,8 @@
             )
         }
 
-        private func rpcDetectionSettings() -> RPCStateSnapshot.Settings.Detection {
-            RPCStateSnapshot.Settings.Detection(
-                watchTeams: watchTeams,
-                watchZoom: watchZoom,
-                watchWebex: watchWebex,
-                autoWatch: autoWatch,
-                pollIntervalSeconds: pollInterval,
-            )
-        }
-
         private func rpcRecordingSettings() -> RPCStateSnapshot.Settings.Recording {
             RPCStateSnapshot.Settings.Recording(
-                endGraceSeconds: endGrace,
                 noMic: noMic,
                 recordOnly: recordOnly,
                 micDeviceUID: micDeviceUID,

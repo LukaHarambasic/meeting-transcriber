@@ -149,10 +149,10 @@ final class RPCClientTests: XCTestCase {
         XCTAssertEqual(captured.value, "GET /ui/tree?window=settings HTTP/1.1")
     }
 
-    /// The confirm-browser-consent command posts a Bool payload; it must
-    /// serialize as a JSON boolean (`true`), not the integer `1`, so the
-    /// server's `ConsentPayload { granted: Bool }` decodes it. Captures the
-    /// request body off a fake server and asserts the exact bytes.
+    /// A `json:` payload containing a `Bool` must serialize as a JSON boolean
+    /// (`true`), not the integer `1`, so a server-side `Codable` struct with a
+    /// `Bool` field decodes it. Captures the request body off a fake server
+    /// and asserts the exact bytes.
     func testPostSerializesBoolPayloadAsJSONBoolean() async throws {
         let listener = try NWListener(using: .tcp, on: .any)
         let held = SilentConnectionHolder()
@@ -184,7 +184,7 @@ final class RPCClientTests: XCTestCase {
         }
         let client = RPCClient(baseURL: baseURL, token: "test-token")
 
-        _ = try await client.post("/action/confirmBrowserConsent", json: ["granted": true])
+        _ = try await client.post("/action/test", json: ["granted": true])
 
         XCTAssertEqual(captured.value, #"{"granted":true}"#)
     }

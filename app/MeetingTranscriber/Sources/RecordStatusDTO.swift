@@ -1,14 +1,8 @@
 import Foundation
 
 /// Wire shape for `GET`/`POST /v1/record` — the microphone-recording lifecycle
-/// as a small, stable projection, built alongside `WatchStatusDTO` and for the
-/// same audience: a Stream Deck key, a Shortcut, a shell script.
-///
-/// A resource of its own rather than a verb on `/v1/watch`, because the two
-/// answer different questions and refuse for different reasons. Watching arms
-/// the detector and records nothing by itself, so it starts on a machine whose
-/// microphone is switched off or denied; this one records the room right now,
-/// where either of those means capturing nothing at all.
+/// as a small, stable projection, for a Stream Deck key, a Shortcut, or a shell
+/// script to poll and drive.
 ///
 /// The fields are facts, not advice. A client decides what to draw from them:
 /// `recording` for the key itself, and `otherRecordingActive` / `noMic` /
@@ -17,10 +11,10 @@ import Foundation
 struct RecordStatusDTO: Codable, Equatable {
     /// Whether a microphone-only recording is in progress.
     ///
-    /// Deliberately narrower than "something is recording": an app-picker
-    /// recording and an auto-detected meeting are not this endpoint's recording,
-    /// and reporting them here would invite a client to `stop` one it never
-    /// started. `otherRecordingActive` carries those.
+    /// Deliberately narrower than "something is recording": an app or system
+    /// capture is not this endpoint's recording, and reporting it here would
+    /// invite a client to `stop` one it never started. `otherRecordingActive`
+    /// carries those.
     let recording: Bool
     /// Whether a start has been accepted but is not recording yet.
     ///
@@ -28,16 +22,15 @@ struct RecordStatusDTO: Codable, Equatable {
     /// and on a first run that means an OS dialog nobody has answered. Without
     /// this field the whole window reads as plain idle, so a key that renders
     /// "press to start" from `recording` keeps offering a press that will only
-    /// queue behind the one already waiting. `WatchStatusDTO.manualRecording`
-    /// covers the same window on the other resource.
+    /// queue behind the one already waiting.
     let startPending: Bool
-    /// `WatchLoop.State` raw value (`idle`/`watching`/`recording`/`error`), or
-    /// nil when no loop exists.
+    /// `WatchLoop.State` raw value (`idle`/`recording`/`error`), or nil when no
+    /// loop exists.
     let state: String?
     /// `BadgeKind` raw value — what the menu bar icon is showing right now.
     let badge: String
-    /// Whether some other capture owns the watch loop: an auto-detected meeting
-    /// or an app-picker recording. A start is refused with 409 while this is
+    /// Whether an app or system capture (rather than a plain microphone
+    /// recording) owns the loop. A start is refused with 409 while this is
     /// true, because it would clobber a recording already in progress.
     let otherRecordingActive: Bool
     /// Whether the user set "No Microphone (app audio only)". A start is refused
@@ -46,8 +39,8 @@ struct RecordStatusDTO: Codable, Equatable {
     /// keep off it.
     let noMic: Bool
     /// False only when a microphone probe has actually failed — denied, or
-    /// allowed-but-not-working. A check that has not run yet reports true, the
-    /// same way `WatchStatusDTO.permissionsHealthy` treats an unknown result.
+    /// allowed-but-not-working. A check that has not run yet reports true, so
+    /// an unknown result never reads as broken.
     ///
     /// Scoped to the one permission a microphone recording needs, not the
     /// aggregate: a denied Screen Recording grant is irrelevant here (nothing
@@ -77,11 +70,9 @@ struct RecordStatusDTO: Codable, Equatable {
     )
 }
 
-/// What a `POST /v1/record` asks for. `start`/`stop` sit alongside `toggle` for
-/// the reason spelled out on `WatchAction`.
-///
-/// A separate enum from that one, rather than a shared verb set, so a verb added
-/// to one resource does not silently appear on the other's payload.
+/// What a `POST /v1/record` asks for. `start`/`stop` sit alongside `toggle`
+/// because a caller driving a physical key (Stream Deck) often doesn't track
+/// which state the recording is currently in — `toggle` lets it press blind.
 enum RecordAction: String, Codable {
     case start
     case stop
@@ -92,13 +83,8 @@ enum RecordAction: String, Codable {
 /// status code, so a caller can tell "already recording" from "refused" without
 /// diffing state before and after.
 ///
-/// Deliberately not `Codable`, for the same reason as `WatchControlOutcome`: it
-/// never crosses the wire. The route reads it to pick a status code and builds
-/// the body from `recordStatusDTO()`.
-///
-/// One case more than `WatchControlOutcome`, and that case is why this endpoint
-/// exists as its own resource: a microphone recording has preconditions that
-/// watching does not, and both of them mean nothing would be captured.
+/// Deliberately not `Codable`: it never crosses the wire. The route reads it to
+/// pick a status code and builds the body from `recordStatusDTO()`.
 enum RecordControlOutcome: Equatable {
     /// The request changed the recording state. → 200
     case changed

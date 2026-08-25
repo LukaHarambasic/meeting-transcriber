@@ -1,29 +1,11 @@
 import AppKit
 import SwiftUI
-import UserNotifications
 
 struct GeneralSettingsView: View {
     @Bindable var settings: AppSettings
     var updateChecker: UpdateChecker?
 
-    /// Latest notification visibility from `PermissionsController`, or nil
-    /// before the first check. Browser-meeting recording depends on it (the
-    /// consent prompt is a notification), and nothing else in the app can say so
-    /// without using the channel that is broken.
-    var notificationVisibility: NotificationVisibility?
-
-    /// Nil until the first permission check. The case, not just the message:
-    /// how total the failure is decides the headline.
-    private var browserConsentReadiness: BrowserConsentReadiness? {
-        guard let notificationVisibility else { return nil }
-        return BrowserConsentReadiness.evaluate(
-            browserMeetingsEnabled: settings.watchBrowserMeetings,
-            visibility: notificationVisibility,
-        )
-    }
-
     var body: some View {
-        // swiftlint:disable:next closure_body_length
         Form {
             Section("Mode") {
                 Toggle("Record-only mode", isOn: $settings.recordOnly)
@@ -33,129 +15,12 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            Section("Apps to Watch") {
-                Toggle("Microsoft Teams", isOn: $settings.watchTeams)
-                Toggle("Zoom", isOn: $settings.watchZoom)
-                Toggle("Webex", isOn: $settings.watchWebex)
-                Toggle("WeChat", isOn: $settings.watchWeChat)
-                Toggle("Tencent Meeting", isOn: $settings.watchTencentMeeting)
-                Toggle("FaceTime", isOn: $settings.watchFaceTime)
-                Toggle("WhatsApp", isOn: $settings.watchWhatsApp)
-                Toggle("Browser Web Meetings", isOn: $settings.watchBrowserMeetings)
-                    .accessibilityIdentifier(A11yID.watchBrowserToggle)
-                Text(
-                    """
-                    Detects web meetings (Google Meet, Whereby, web Zoom/Teams) by the WebRTC \
-                    signal, so any browser works. Other apps that place calls can trigger it too; \
-                    it always asks before recording, and "Never for this app" stops one for good.
-                    """,
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                browserConsentWarning
-                consentDenyList
-            }
-
-            Section("Detection") {
-                HStack {
-                    Text("Poll Interval")
-                    Spacer()
-                    TextField("", value: $settings.pollInterval, format: .number)
-                        .frame(width: 60)
-                        .multilineTextAlignment(.trailing)
-                    Stepper("", value: $settings.pollInterval, in: 1 ... 30, step: 0.5)
-                        .labelsHidden()
-                    Text("seconds").foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Text("Grace Period")
-                    Spacer()
-                    TextField("", value: $settings.endGrace, format: .number)
-                        .frame(width: 60)
-                        .multilineTextAlignment(.trailing)
-                    Stepper("", value: $settings.endGrace, in: 1 ... 120, step: 1)
-                        .labelsHidden()
-                    Text("seconds").foregroundStyle(.secondary)
-                }
-            }
-
             if let updateChecker {
                 updatesSection(updateChecker: updateChecker)
             }
         }
         .formStyle(.grouped)
     }
-
-    /// Apps the user answered "Never for this app" about.
-    ///
-    /// Shown whenever the list is non-empty, deliberately NOT gated on the
-    /// browser toggle. Today only browser meetings ask for consent, but the
-    /// gate it hangs off is `requiresRecordingConsent`, a general pattern
-    /// property, and the moment another app adopts it a denial made there would
-    /// become impossible to undo behind a browser-specific switch. An empty
-    /// list stays hidden: the only reason to come here is to take back a Never.
-    ///
-    /// Writes go through `ConsentDenyListStore`, the same path the consent gate
-    /// uses, so list semantics live in one place instead of two.
-    @ViewBuilder private var consentDenyList: some View {
-        if !settings.consentDeniedApps.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Never record these apps")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                ForEach(Array(settings.consentDeniedApps.enumerated()), id: \.element) { index, app in
-                    HStack {
-                        Text(app)
-                            .font(.caption)
-                        Spacer()
-                        Button("Remove") {
-                            ConsentDenyListStore(settings: settings).revert(app)
-                        }
-                        .accessibilityIdentifier(A11yID.consentDeniedAppRemove(index))
-                    }
-                }
-            }
-            .accessibilityIdentifier(A11yID.consentDenyListSection)
-        }
-    }
-
-    /// Warns when browser watching is on but the consent prompt cannot reach the
-    /// user. Rendered here rather than as a notification for the obvious reason,
-    /// and kept out of the menu-bar permission badge because this permission only
-    /// matters for this one opt-in feature.
-    @ViewBuilder private var browserConsentWarning: some View {
-        if let readiness = browserConsentReadiness,
-           let headline = readiness.headline,
-           let warning = readiness.warning {
-            Label {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(headline)
-                        .font(.callout.weight(.semibold))
-                    Text(warning)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier(A11yID.browserConsentWarning)
-                    Button("Open Notification Settings") {
-                        NSWorkspace.shared.open(Self.notificationSettingsURL)
-                    }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                }
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            }
-            .padding(8)
-            .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
-        }
-    }
-
-    /// Deep link to System Settings > Notifications. Verified to land on the
-    /// Notifications pane rather than merely opening the app.
-    private static let notificationSettingsURL = URL(
-        string: "x-apple.systempreferences:com.apple.preference.notifications",
-    )!
 
     private var recordOnlyBanner: some View {
         let display = OutputSettingsLogic.displayPath(

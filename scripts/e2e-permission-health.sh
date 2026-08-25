@@ -76,10 +76,9 @@ fi
 quit_running_app
 bootout_stale_launchctl
 
-# --- 3. Launch (suppress auto-watch so the app stays idle) ---------------
+# --- 3. Launch ------------------------------------------------------------
 
 env MEETINGTRANSCRIBER_DEBUG_RPC=1 \
-    MEETINGTRANSCRIBER_DEBUG_SUPPRESS_AUTOWATCH=1 \
     "$BIN" &
 APP_PID=$!
 
