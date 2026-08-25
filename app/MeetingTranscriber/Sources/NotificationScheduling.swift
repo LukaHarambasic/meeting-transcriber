@@ -12,14 +12,6 @@ import UserNotifications
 /// notifications, which unit coverage can't reach.
 protocol NotificationScheduling: AnyObject, Sendable {
     func add(_ request: UNNotificationRequest)
-
-    /// Withdraw already-delivered notifications. Only the consent prompt needs
-    /// it: macOS clears a notification the user tapped, but not one that
-    /// expired or was answered out of band, so without this the dead prompts
-    /// pile up in Notification Center.
-    func removeDelivered(withIdentifiers identifiers: [String])
-
-    func setCategories(_ categories: Set<UNNotificationCategory>)
     func setDelegate(_ delegate: (any UNUserNotificationCenterDelegate)?)
     func requestAuthorization()
 }
@@ -32,10 +24,9 @@ final class SystemNotificationScheduler: NotificationScheduling, Sendable {
 
     /// Completion-handler form, only for the error. The fire-and-forget
     /// overload discards it, so a rejected post looked exactly like a
-    /// successful one from inside the app — and the consent prompt is the one
-    /// notification where that difference decides whether a meeting is
-    /// recorded. `.public` on the message: `localizedDescription`, never
-    /// `String(describing:)`, which can carry a home-directory path.
+    /// successful one from inside the app. `.public` on the message:
+    /// `localizedDescription`, never `String(describing:)`, which can carry a
+    /// home-directory path.
     func add(_ request: UNNotificationRequest) {
         // The identifier is lifted out because `UNNotificationRequest` is not
         // Sendable and the completion is a `@Sendable` closure.
@@ -49,14 +40,6 @@ final class SystemNotificationScheduler: NotificationScheduling, Sendable {
                 """,
             )
         }
-    }
-
-    func removeDelivered(withIdentifiers identifiers: [String]) {
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
-    }
-
-    func setCategories(_ categories: Set<UNNotificationCategory>) {
-        UNUserNotificationCenter.current().setNotificationCategories(categories)
     }
 
     func setDelegate(_ delegate: (any UNUserNotificationCenterDelegate)?) {
