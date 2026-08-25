@@ -17,9 +17,10 @@ private let logger = Logger(subsystem: "com.meetingtranscriber.audiotap", catego
 /// rather than expressible to the compiler.
 @available(macOS 14.2, *)
 public class AppAudioCapture: @unchecked Sendable {
-    /// `internal` (not `private`) so the cross-file `+PIDTranslation`
-    /// extension can read it; it's not otherwise touched from outside.
-    let pids: [pid_t]
+    /// `internal` (not `private`) so the cross-file `+PIDTranslation` and
+    /// `+TapTarget` extensions can read it; it's not otherwise touched from
+    /// outside.
+    let target: TapTarget
     /// `sampleRate` and `liveSink` are `internal` (not `private`) so the
     /// cross-file `+LiveSink` extension can populate the live buffer struct.
     let sampleRate: Int
@@ -125,11 +126,13 @@ public class AppAudioCapture: @unchecked Sendable {
     public var onGiveUp: (() -> Void)?
 
     /// - Parameters:
-    ///   - pids: Process IDs to capture audio from. Pass the meeting app's
+    ///   - target: What to tap. `.processes` should carry the meeting app's
     ///     root PID plus its helper/renderer child PIDs for Electron-based
-    ///     apps (Teams 2.x, Slack, Discord); pass a single-element array
-    ///     for native Cocoa apps. Helpers whose `translatePIDToProcessObject`
+    ///     apps (Teams 2.x, Slack, Discord), or a single-element array for
+    ///     native Cocoa apps — helpers whose `translatePIDToProcessObject`
     ///     lookup fails (no audio-object entry) are skipped silently.
+    ///     `.systemMixdown` needs no PIDs at all: it taps everything the Mac
+    ///     plays.
     ///   - outputFileDescriptor: File descriptor to write raw PCM data to.
     ///   - sampleRate: Desired sample rate (default 48000).
     ///   - channels: Number of audio channels (default 2).
@@ -139,7 +142,7 @@ public class AppAudioCapture: @unchecked Sendable {
     ///     Called on the audio IOProc thread — must not block. Nil = no-op,
     ///     existing batch path unchanged.
     public convenience init(
-        pids: [pid_t],
+        target: TapTarget,
         outputFileDescriptor: Int32,
         sampleRate: Int = 48000,
         channels: Int = 2,
@@ -147,7 +150,7 @@ public class AppAudioCapture: @unchecked Sendable {
         liveSink: LiveAudioSink? = nil,
     ) {
         self.init(
-            pids: pids,
+            target: target,
             outputFileDescriptor: outputFileDescriptor,
             sampleRate: sampleRate,
             channels: channels,
@@ -161,7 +164,7 @@ public class AppAudioCapture: @unchecked Sendable {
     /// hardware work so the restart choreography can be exercised on a machine
     /// with no audio device, and made to block so the deadline can be observed.
     init(
-        pids: [pid_t],
+        target: TapTarget,
         outputFileDescriptor: Int32,
         sampleRate: Int = 48000,
         channels: Int = 2,
@@ -169,7 +172,7 @@ public class AppAudioCapture: @unchecked Sendable {
         liveSink: LiveAudioSink? = nil,
         attemptBody: (() throws -> AppTapSession?)?,
     ) {
-        self.pids = pids
+        self.target = target
         self.outputFileDescriptor = outputFileDescriptor
         self.sampleRate = sampleRate
         self.channels = channels
@@ -327,27 +330,7 @@ public class AppAudioCapture: @unchecked Sendable {
 
     // swiftlint:disable:next function_body_length
     private func startCapture() throws -> AppTapSession {
-        let translated = try translatePIDs()
-        let processObjectIDs = translated.map(\.audioObjectID)
-
-        // Always log at info level with exe names so a "silent _app.wav"
-        // report can be triaged without the user toggling Verbose Audio
-        // Logging first — process names like "MSTeams Helper (Renderer)"
-        // make issue-#84-style failures actionable.
-        let tapSummary = translated.map { "\(getExecutableName(pid: $0.pid))(\($0.pid))" }.joined(separator: ", ")
-        logger.info(
-            "App audio tap: \(translated.count) PID(s) [\(tapSummary, privacy: .public)]",
-        )
-
-        if debugLogging {
-            for entry in translated {
-                let bundleID = getProcessBundleID(entry.audioObjectID) ?? "?"
-                let exeName = getExecutableName(pid: entry.pid)
-                logger.info(
-                    "[debug] Tap target: pid=\(entry.pid, privacy: .public) exe=\(exeName, privacy: .public) bundle=\(bundleID, privacy: .public) audioObjectID=\(entry.audioObjectID, privacy: .public)",
-                )
-            }
-        }
+        let processObjectIDs = try resolveProcessObjectIDs()
 
         // Get default output device UID
         guard let systemOutputUID = getDefaultOutputDeviceUID() else {
@@ -371,10 +354,11 @@ public class AppAudioCapture: @unchecked Sendable {
             )
         }
 
-        // Create CATapDescription for the target process(es). For Electron
-        // apps this covers the helper tree so the renderer holding the audio
-        // handle is included; for native apps the array is a single PID.
-        let tap = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
+        // Create the CATapDescription for the target. For `.processes` this
+        // covers the helper tree so the renderer holding the audio handle is
+        // included (for native apps the array is a single PID); for
+        // `.systemMixdown` there is no process list at all.
+        let tap = Self.makeTapDescription(target: target, processObjectIDs: processObjectIDs)
         tap.uuid = UUID()
         tap.name = "MeetingTranscriber-tap"
         tap.isPrivate = true
@@ -385,7 +369,7 @@ public class AppAudioCapture: @unchecked Sendable {
         guard tapStatus == noErr else {
             let hint = Self.describeTapError(tapStatus)
             logger.error(
-                "Failed to create process tap (pids=\(self.pids, privacy: .public)): \(hint, privacy: .public)",
+                "Failed to create process tap (\(self.targetDescription, privacy: .public)): \(hint, privacy: .public)",
             )
             throw NSError(
                 domain: "audiotap", code: Int(tapStatus),
@@ -410,7 +394,7 @@ public class AppAudioCapture: @unchecked Sendable {
         }
 
         let desc = Self.aggregateDescription(
-            nameTag: pids.first.map(String.init) ?? "0",
+            nameTag: aggregateNameTag,
             outputUID: systemOutputUID,
             tapUUID: tap.uuid.uuidString,
         )
@@ -531,7 +515,7 @@ public class AppAudioCapture: @unchecked Sendable {
         // give-up cannot resurrect the IOProc against a file descriptor the
         // session has already closed.
         logger.info(
-            "Audio capture started (PIDs \(self.pids), rate: \(session.resolvedSampleRate) Hz)",
+            "Audio capture started (\(self.targetDescription), rate: \(session.resolvedSampleRate) Hz)",
         )
         return session
     }

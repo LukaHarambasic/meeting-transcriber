@@ -18,11 +18,12 @@ import Foundation
 /// gating it would force every consumer that merely *describes* a capture to
 /// carry the version check too.
 public struct AudioCaptureConfiguration: Sendable {
-    /// PIDs to capture audio from. For Electron/WebView2 apps (Teams 2.x,
-    /// Slack, Discord) this should include the root PID plus helper/renderer
+    /// What the app-audio tap listens to: named processes, or the whole
+    /// system-wide mixdown. For Electron/WebView2 apps (Teams 2.x, Slack,
+    /// Discord) `.processes` should include the root PID plus helper/renderer
     /// children; for native Cocoa apps a single-element array is fine. Ignored
     /// when `appOutputURL` is nil.
-    public let pids: [pid_t]
+    public let tapTarget: TapTarget
 
     /// Where to write the app-audio track, or nil to open no process tap at
     /// all. Nil is the microphone-only shape: the session then has exactly one
@@ -72,7 +73,7 @@ public struct AudioCaptureConfiguration: Sendable {
     /// that nothing would notice drifting. What is left describes optional
     /// extras, where leaving one out is a choice.
     public init(
-        pids: [pid_t],
+        tapTarget: TapTarget,
         appOutputURL: URL?,
         micOutputURL: URL?,
         sampleRate: Int,
@@ -82,7 +83,7 @@ public struct AudioCaptureConfiguration: Sendable {
         appLiveSink: LiveAudioSink? = nil,
         micLiveSink: LiveAudioSink? = nil,
     ) {
-        self.pids = pids
+        self.tapTarget = tapTarget
         self.appOutputURL = appOutputURL
         self.micOutputURL = micOutputURL
         self.sampleRate = sampleRate

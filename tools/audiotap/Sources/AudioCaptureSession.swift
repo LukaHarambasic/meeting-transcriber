@@ -64,7 +64,7 @@ public class AudioCaptureSession {
             let handle = try FileHandle(forWritingTo: appOutputURL)
 
             let capture = AppAudioCapture(
-                pids: config.pids,
+                target: config.tapTarget,
                 outputFileDescriptor: handle.fileDescriptor,
                 sampleRate: config.sampleRate,
                 channels: config.channels,
@@ -107,7 +107,8 @@ public class AudioCaptureSession {
             }
         }
 
-        logger.info("Capture session started (PIDs \(self.config.pids), rate: \(self.config.sampleRate), channels: \(self.config.channels))")
+        let targetDescription = String(describing: config.tapTarget)
+        logger.info("Capture session started (target: \(targetDescription), rate: \(self.config.sampleRate), channels: \(self.config.channels))")
     }
 
     /// Instantaneous app-audio level in dBFS, decayed to -120 when no buffer has

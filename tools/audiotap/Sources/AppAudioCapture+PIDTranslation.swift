@@ -4,6 +4,15 @@ import Foundation
 /// Translates PIDs to CoreAudio process `AudioObjectID`s for `CATapDescription`.
 @available(macOS 14.2, *)
 extension AppAudioCapture {
+    /// The PIDs to translate, for the `.processes` arm of `target`. Empty for
+    /// `.systemMixdown`, which `startCapture` never routes through
+    /// `translatePIDs()` at all — a global tap has no per-process entries to
+    /// look up.
+    private var pids: [pid_t] {
+        guard case let .processes(pids) = target else { return [] }
+        return pids
+    }
+
     /// Translate every stored PID and return (pid, audioObjectID) pairs.
     /// PIDs that fail translation (helper has no audio-object entry, process
     /// exited between enumeration and tap creation) are dropped — that's

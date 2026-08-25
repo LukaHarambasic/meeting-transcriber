@@ -11,7 +11,7 @@ final class AppAudioCaptureResamplingTests: XCTestCase {
     func testOutputFormatIsSpeechRateMono() {
         // AudioCaptureSession reports this as the produced file's format —
         // buildRecording trusts it (and skips the rate cross-check on it).
-        let capture = AppAudioCapture(pids: [], outputFileDescriptor: -1)
+        let capture = AppAudioCapture(target: .processes([]), outputFileDescriptor: -1)
         XCTAssertEqual(capture.outputSampleRate, Int(speechSampleRate))
         XCTAssertEqual(capture.outputChannels, 1)
     }

@@ -70,7 +70,7 @@ final class AppAudioCaptureSessionOwnershipTests: XCTestCase {
     }
 
     private func makeCapture(_ attempt: Attempt) -> AppAudioCapture {
-        AppAudioCapture(pids: [1], outputFileDescriptor: FileHandle.nullDevice.fileDescriptor) {
+        AppAudioCapture(target: .processes([1]), outputFileDescriptor: FileHandle.nullDevice.fileDescriptor) {
             attempt.run()
         }
     }
