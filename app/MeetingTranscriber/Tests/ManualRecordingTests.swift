@@ -250,6 +250,68 @@ final class ManualRecordingTests: XCTestCase {
         loop.stop()
     }
 
+    // MARK: - "Record Meeting" (system-wide recording)
+
+    func testStartMeetingRecordingTapsTheSystemMixdown() async throws {
+        let (loop, mock) = makeLoop()
+        try await loop.startMeetingRecording()
+        defer { loop.stop() }
+
+        XCTAssertEqual(
+            mock.capturedSource, .systemAndMic,
+            "a meeting recording taps the whole system output alongside the microphone",
+        )
+    }
+
+    func testMeetingRecordingPublishesTheMeetingIdentity() async throws {
+        let (loop, _) = makeLoop()
+        try await loop.startMeetingRecording()
+        defer { loop.stop() }
+
+        XCTAssertTrue(loop.isManualRecording)
+        XCTAssertNil(loop.manualRecordingInfo?.pid, "there is no single process behind a system-wide recording")
+        XCTAssertEqual(loop.manualRecordingInfo?.appName, ManualRecordingInfo.meetingAppName)
+        XCTAssertEqual(loop.manualRecordingInfo?.title, ManualRecordingInfo.meetingTitle)
+    }
+
+    /// The pid-less case `activeRecordingSource` has to disambiguate: a
+    /// microphone-only recording and a meeting recording both carry a nil pid,
+    /// so getting this wrong reports the meeting's app channel as a channel
+    /// that was never opened rather than one that is live.
+    func testTheLiveSourceOfAMeetingRecordingIsDistinctFromMicrophoneOnly() async throws {
+        let (loop, _) = makeLoop()
+        try await loop.startMeetingRecording()
+        defer { loop.stop() }
+
+        XCTAssertEqual(loop.activeRecordingSource, .systemAndMic)
+    }
+
+    /// Unlike the microphone entry point, `noMic` *is* honoured here: it drops
+    /// the mic channel rather than refusing outright, since the system tap
+    /// still captures something under it.
+    func testMeetingRecordingHonoursNoMicByDroppingTheMicChannelNotRefusing() async throws {
+        let (loop, mock) = makeLoop(noMic: true)
+
+        try await loop.startMeetingRecording()
+        defer { loop.stop() }
+
+        XCTAssertEqual(mock.capturedSource, .systemOnly)
+        XCTAssertEqual(loop.state, .recording, "noMic must not refuse a source that still captures the system tap")
+    }
+
+    func testStopMeetingRecordingEnqueuesJob() async throws {
+        let queue = PipelineQueue()
+        let (loop, _) = makeLoop(pipelineQueue: queue)
+        try await loop.startMeetingRecording()
+
+        loop.stopManualRecording()
+
+        XCTAssertEqual(loop.state, .idle)
+        XCTAssertEqual(queue.jobs.count, 1)
+        XCTAssertEqual(queue.jobs.first?.meetingTitle, ManualRecordingInfo.meetingTitle)
+        XCTAssertEqual(queue.jobs.first?.appName, ManualRecordingInfo.meetingAppName)
+    }
+
     // MARK: - Auto-watch interaction
 
     func testStartManualRecordingStopsAutoWatch() async throws {

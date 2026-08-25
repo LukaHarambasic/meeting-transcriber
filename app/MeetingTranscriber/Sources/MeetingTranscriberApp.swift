@@ -107,6 +107,7 @@ struct MeetingTranscriberApp: App {
                 pipelineQueue: appState.pipelineQueue,
                 updateChecker: appState.updateChecker,
                 onStartStop: { appState.watching.toggleWatching() },
+                onRecordMeeting: { appState.watching.startMeetingRecording() },
                 onRecordApp: { bringWindowToFront(id: "record-app") },
                 onRecordMicrophone: { appState.watching.startMicrophoneRecording() },
                 noMic: appState.settings.noMic,

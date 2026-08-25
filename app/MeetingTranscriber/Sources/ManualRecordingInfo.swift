@@ -19,4 +19,10 @@ extension ManualRecordingInfo {
     /// the record-only sidecar and the tests all have to agree on them.
     static let microphoneAppName = "Microphone"
     static let microphoneTitle = "Microphone Recording"
+
+    /// Identity for a "Record Meeting" (system-wide) recording, for the same
+    /// reason as the microphone pair above: there is no single app to name, and
+    /// the job, the record-only sidecar and the tests all have to agree.
+    static let meetingAppName = "Meeting"
+    static let meetingTitle = "Meeting Recording"
 }

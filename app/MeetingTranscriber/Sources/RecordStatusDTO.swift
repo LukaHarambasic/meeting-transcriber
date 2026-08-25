@@ -116,9 +116,13 @@ enum RecordControlOutcome: Equatable {
 /// `app` is the same capture the app picker starts: the target process's audio
 /// plus the microphone (unless "No Microphone" is set). It exists on the wire so
 /// automation can record a specific app without a human in front of the picker.
+///
+/// `system` is "Record Meeting": the whole system output mixdown plus the
+/// microphone, for an in-room meeting with no single app to target.
 enum RecordSource: String, Codable {
     case microphone = "mic"
     case app
+    case system
 }
 
 /// Request body for `POST /v1/record`. An unrecognised action string fails to
@@ -158,10 +162,18 @@ struct RecordActionPayload: Codable, Equatable {
     /// The manual-recording request this payload asks for, or nil when the
     /// payload names nothing recordable (an app source without a pid). The
     /// route turns that nil into a 400 before the controller is involved.
+    ///
+    /// `pid`/`appName`/`title` are ignored for `.system`: the identity of a
+    /// "Record Meeting" recording is fixed by `ManualRecordingInfo`'s
+    /// `meetingAppName`/`meetingTitle` constants, the same way `.microphone`
+    /// ignores them for its own fixed identity.
     var manualRecordingRequest: ManualRecordingRequest? {
         switch source ?? .microphone {
         case .microphone:
             return .microphone
+
+        case .system:
+            return .meeting
 
         case .app:
             guard let pid else { return nil }

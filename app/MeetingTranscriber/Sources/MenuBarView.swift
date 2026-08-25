@@ -6,6 +6,7 @@ struct MenuBarView: View {
     let pipelineQueue: PipelineQueue
     var updateChecker: UpdateChecker?
     let onStartStop: () -> Void
+    let onRecordMeeting: () -> Void
     let onRecordApp: () -> Void
     let onRecordMicrophone: () -> Void
     /// Whether the user set "No Microphone (app audio only)". Only reaches the
@@ -140,6 +141,19 @@ struct MenuBarView: View {
             }
             .keyboardShortcut(".")
         } else if state != .recording {
+            // Primary entry point: the one-click "sit in a meeting room" shape,
+            // so it sits above the narrower Record Microphone and takes the
+            // shortcut that used to be Record App's — always enabled, since
+            // there is no permission or setting that turns it into a recording
+            // of nothing (see `WatchLoop.startMeetingRecording`).
+            Button {
+                onRecordMeeting()
+            } label: {
+                Label("Record Meeting", systemImage: "record.circle.fill")
+            }
+            .keyboardShortcut("r")
+            .help("Record all system audio and the microphone — for a meeting in the room")
+
             Button {
                 onRecordMicrophone()
             } label: {
@@ -154,7 +168,7 @@ struct MenuBarView: View {
             } label: {
                 Label("Record App...", systemImage: "record.circle")
             }
-            .keyboardShortcut("r")
+            .keyboardShortcut("a")
         }
 
         if let onNameSpeakers {

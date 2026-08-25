@@ -24,32 +24,48 @@ enum RecordingSource: Equatable {
     /// Record the microphone with no process tap at all, for a meeting that
     /// happens in the room rather than in an app.
     case micOnly
+
+    /// Tap the whole system output mixdown and record the microphone
+    /// alongside it — "Record Meeting": everything the Mac plays plus the
+    /// room, for a meeting whose remote side plays through the speakers
+    /// rather than headphones.
+    case systemAndMic
+
+    /// Tap the system mixdown only, because the user set "No Microphone".
+    case systemOnly
 }
 
 extension RecordingSource {
-    /// The process to tap, or nil when this source opens no tap. Also the
-    /// process whose exit ends the recording — a microphone-only session has
-    /// none, so only its duration cap applies.
+    /// The process to tap, or nil when this source opens no tap — including
+    /// both system-wide cases, which tap the whole output mixdown rather than
+    /// any one process. Also the process whose exit ends the recording — a
+    /// microphone-only or system-wide session has none, so only its duration
+    /// cap applies.
     var appPID: pid_t? {
         switch self {
         case let .appAndMic(pid), let .appOnly(pid): pid
-        case .micOnly: nil
+        case .micOnly, .systemAndMic, .systemOnly: nil
         }
     }
 
-    /// Whether a CATap process tap is opened. This is what the Screen Recording
-    /// arm of the permission gate is really asking about: that grant is only a
-    /// preflightable proxy for the tap, so it has no bearing on a session that
-    /// opens none.
+    /// Whether a CATap process tap is opened. Explicit per case rather than
+    /// derived from `appPID != nil`: the system-wide cases target no single
+    /// process, so a PID-based derivation would read them as opening no tap —
+    /// wrong, since `.systemMixdown` is itself a tap, and the Screen Recording
+    /// arm of the permission gate (that grant is only a preflightable proxy for
+    /// the tap) applies to it exactly as it does to an app tap.
     var capturesAppAudio: Bool {
-        appPID != nil
+        switch self {
+        case .appAndMic, .appOnly, .systemAndMic, .systemOnly: true
+        case .micOnly: false
+        }
     }
 
     /// Whether the microphone is recorded.
     var capturesMicrophone: Bool {
         switch self {
-        case .appAndMic, .micOnly: true
-        case .appOnly: false
+        case .appAndMic, .micOnly, .systemAndMic: true
+        case .appOnly, .systemOnly: false
         }
     }
 
@@ -59,10 +75,17 @@ extension RecordingSource {
         noMic ? .appOnly(pid: pid) : .appAndMic(pid: pid)
     }
 
+    /// The source for "Record Meeting" — the whole system output plus the
+    /// microphone, honouring the same "No Microphone" setting the app path
+    /// does.
+    static func forSystem(noMic: Bool) -> Self {
+        noMic ? .systemOnly : .systemAndMic
+    }
+
     var capturedChannels: CapturedChannels {
         switch self {
-        case .appAndMic: .micAndApp
-        case .appOnly: .appOnly
+        case .appAndMic, .systemAndMic: .micAndApp
+        case .appOnly, .systemOnly: .appOnly
         case .micOnly: .micOnly
         }
     }
@@ -70,7 +93,12 @@ extension RecordingSource {
     /// How this source names its target in logs. One wording so `PID 1234`
     /// finds every line about that recording, whichever subsystem wrote it.
     var logDescription: String {
-        appPID.map { "PID \($0)" } ?? "microphone only"
+        switch self {
+        case let .appAndMic(pid), let .appOnly(pid): "PID \(pid)"
+        case .micOnly: "microphone only"
+        case .systemAndMic: "system audio"
+        case .systemOnly: "system audio only"
+        }
     }
 }
 
@@ -81,10 +109,13 @@ extension RecordingSource {
 /// as "no capture session is active **or** the tap stopped delivering buffers",
 /// so a level alone cannot tell a channel that was never opened from one that
 /// died. Without this they report the first as the second.
-/// The three values mirror `RecordingSource`'s three cases, and the memberwise
-/// init stays private so the fourth combination stays unbuildable: a recording
-/// with neither channel is the state `RecordingSource` exists to rule out, and
-/// a projection of it must not quietly hand that state back.
+/// The three values mirror the three channel combinations `RecordingSource`'s
+/// cases can produce (app-and-mic, app-only, mic-only — the system-wide cases
+/// share the app-target values since a monitor cares which channels exist, not
+/// what the app channel is tapping), and the memberwise init stays private so
+/// the fourth combination stays unbuildable: a recording with neither channel
+/// is the state `RecordingSource` exists to rule out, and a projection of it
+/// must not quietly hand that state back.
 struct CapturedChannels: Equatable {
     let mic: Bool
     let app: Bool

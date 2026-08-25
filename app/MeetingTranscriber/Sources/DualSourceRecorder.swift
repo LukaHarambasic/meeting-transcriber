@@ -414,13 +414,21 @@ class DualSourceRecorder: RecordingProvider {
         // audio in helper/renderer children rather than the shell process
         // the OS sees as the window owner. Tap the whole bundle tree so we
         // catch whichever child holds the audio handle; fall back to the
-        // root PID alone if the bundle URL is unavailable.
-        let effectivePids = source.appPID.map { Self.resolveTapPIDs(rootPID: $0) } ?? []
+        // root PID alone if the bundle URL is unavailable. The system-wide
+        // cases need no such resolution — `.systemMixdown` names no process at
+        // all — and a microphone-only source targets no process either, so it
+        // gets the same empty list a nil `appPID` always produced (the tap
+        // target is ignored whenever `appOutputURL` above is nil).
+        let tapTarget: TapTarget = switch source {
+        case .systemAndMic, .systemOnly: .systemMixdown
+        case let .appAndMic(pid), let .appOnly(pid): .processes(Self.resolveTapPIDs(rootPID: pid))
+        case .micOnly: .processes([])
+        }
 
         let session: any AudioCapturing
         do {
             session = try makeCaptureSession(AudioCaptureConfiguration(
-                pids: effectivePids,
+                tapTarget: tapTarget,
                 appOutputURL: appTempURL,
                 micOutputURL: micURL,
                 sampleRate: recordRate,
