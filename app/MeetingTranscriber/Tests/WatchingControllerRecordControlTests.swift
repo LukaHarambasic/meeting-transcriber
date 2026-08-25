@@ -308,6 +308,15 @@ final class WatchingControllerRecordControlTests: XCTestCase {
 
     // MARK: - App source
 
+    /// A pid the real liveness monitor sees as alive for the whole test — this
+    /// test process's own. The controller-path starts below build a *real*
+    /// `WatchLoop` whose monitor checks pid liveness immediately, so a made-up
+    /// pid (dead on CI runners) has the recording auto-stopped before the test
+    /// can look at it.
+    private var alivePid: Int32 {
+        ProcessInfo.processInfo.processIdentifier
+    }
+
     /// The payload shape automation uses to record a specific app without a
     /// human in front of the picker. The pid assertion carries the test: a
     /// start that answered 200 but recorded the microphone instead would pass
@@ -317,11 +326,11 @@ final class WatchingControllerRecordControlTests: XCTestCase {
         addTeardownBlock { await controller.stopManualRecording() }
 
         let outcome = await controller.applyRecordAction(
-            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+            RecordActionPayload(action: .start, source: .app, pid: alivePid, appName: "Chrome", title: "Meeting"),
         )
 
         XCTAssertEqual(outcome, .changed)
-        XCTAssertEqual(controller.watchLoop?.manualRecordingInfo?.pid, 99)
+        XCTAssertEqual(controller.watchLoop?.manualRecordingInfo?.pid, alivePid)
         XCTAssertFalse(controller.isRecordingMicrophoneOnly, "the target is the app, not the microphone")
     }
 
@@ -333,11 +342,11 @@ final class WatchingControllerRecordControlTests: XCTestCase {
         addTeardownBlock { await controller.stopManualRecording() }
 
         let outcome = await controller.applyRecordAction(
-            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+            RecordActionPayload(action: .start, source: .app, pid: alivePid, appName: "Chrome", title: "Meeting"),
         )
 
         XCTAssertEqual(outcome, .changed, "no-mic gates the microphone, not an app capture")
-        XCTAssertEqual(controller.watchLoop?.manualRecordingInfo?.pid, 99)
+        XCTAssertEqual(controller.watchLoop?.manualRecordingInfo?.pid, alivePid)
     }
 
     /// Same idempotency rule the microphone start follows: an app recording of
@@ -346,7 +355,9 @@ final class WatchingControllerRecordControlTests: XCTestCase {
     func testAppScopedRepeatStartIsUnchangedAndKeepsTheRecording() async {
         let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
         addTeardownBlock { await controller.stopManualRecording() }
-        let payload = RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting")
+        let payload = RecordActionPayload(
+            action: .start, source: .app, pid: alivePid, appName: "Chrome", title: "Meeting",
+        )
         let started = await controller.applyRecordAction(payload)
         XCTAssertEqual(started, .changed, "precondition")
         let loop = controller.watchLoop
@@ -364,7 +375,7 @@ final class WatchingControllerRecordControlTests: XCTestCase {
         let loop = try await microphoneRecording(on: controller)
 
         let outcome = await controller.applyRecordAction(
-            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+            RecordActionPayload(action: .start, source: .app, pid: alivePid, appName: "Chrome", title: "Meeting"),
         )
 
         XCTAssertEqual(outcome, .blocked)
@@ -376,12 +387,12 @@ final class WatchingControllerRecordControlTests: XCTestCase {
         let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
         addTeardownBlock { await controller.stopManualRecording() }
         let started = await controller.applyRecordAction(
-            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+            RecordActionPayload(action: .start, source: .app, pid: alivePid, appName: "Chrome", title: "Meeting"),
         )
         XCTAssertEqual(started, .changed, "precondition")
 
         let outcome = await controller.applyRecordAction(
-            RecordActionPayload(action: .stop, source: .app, pid: 99),
+            RecordActionPayload(action: .stop, source: .app, pid: alivePid),
         )
 
         XCTAssertEqual(outcome, .changed)
