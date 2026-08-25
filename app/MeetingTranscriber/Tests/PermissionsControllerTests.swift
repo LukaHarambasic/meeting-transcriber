@@ -65,18 +65,6 @@ final class PermissionsControllerTests: XCTestCase {
         XCTAssertEqual(notifier.calls.count, 2, "Different problem sets should each trigger a notification")
     }
 
-    func testHandleAccessibilityBrokenNotifies() {
-        let notifier = RecordingNotifier()
-        let controller = PermissionsController(notifier: notifier)
-        controller.handle(HealthCheckResult(
-            screenRecording: .healthy,
-            microphone: .healthy,
-            accessibility: .broken,
-        ))
-        XCTAssertEqual(notifier.calls.count, 1)
-        XCTAssertTrue(notifier.calls.first?.body.contains("Accessibility") ?? false)
-    }
-
     // MARK: - check: probe + debounce (impossible before extraction)
 
     func testCheckRunsProbeAndStoresHealth() async {

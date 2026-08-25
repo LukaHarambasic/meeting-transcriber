@@ -8,10 +8,6 @@ final class TranscriberStatusTests: XCTestCase {
         XCTAssertEqual(TranscriberState.idle.label, "Idle")
     }
 
-    func testWatchingLabel() {
-        XCTAssertEqual(TranscriberState.watching.label, "Watching for Meetings...")
-    }
-
     func testRecordingLabel() {
         XCTAssertEqual(TranscriberState.recording.label, "Recording")
     }
@@ -44,10 +40,6 @@ final class TranscriberStatusTests: XCTestCase {
 
     func testIdleIcon() {
         XCTAssertEqual(TranscriberState.idle.icon, "waveform.circle")
-    }
-
-    func testWatchingIcon() {
-        XCTAssertEqual(TranscriberState.watching.icon, "eye.fill")
     }
 
     func testRecordingIcon() {

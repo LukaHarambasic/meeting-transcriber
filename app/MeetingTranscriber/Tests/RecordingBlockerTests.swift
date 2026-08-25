@@ -6,22 +6,6 @@ import XCTest
 /// aggregate `isHealthy` in `PermissionHealthCheckTests`: these two must be able
 /// to disagree, and several of the assertions below exist to pin exactly that.
 final class RecordingBlockerTests: XCTestCase {
-    func testAccessibilityProblemsDoNotBlockRecording() {
-        for status in [PermissionStatus.denied, .broken] {
-            let result = PermissionHealthCheck.overallHealth(
-                screenRecording: .healthy,
-                microphone: .healthy,
-                accessibility: status,
-            )
-            // The menu bar badge and the permission notification still report a
-            // problem, the recording gate does not. Anything that collapses the
-            // two notions back together breaks here.
-            XCTAssertFalse(result.isHealthy, "accessibility \(status) is still a reported problem")
-            XCTAssertTrue(result.recordingBlockers(for: .appAndMic(pid: 1)).isEmpty)
-            XCTAssertNil(result.recordingRefusalReason(for: .appAndMic(pid: 1)))
-        }
-    }
-
     func testMicrophoneProblemsBlockRecording() {
         for (status, problem) in [
             (PermissionStatus.denied, PermissionProblem.microphoneDenied),
@@ -57,17 +41,15 @@ final class RecordingBlockerTests: XCTestCase {
     }
 
     func testRefusalReasonNamesOnlyBlockingProblems() throws {
-        let result = PermissionHealthCheck.overallHealth(
-            screenRecording: .healthy,
-            microphone: .denied,
-            accessibility: .denied,
-        )
-        let body = try XCTUnwrap(result.recordingRefusalReason(for: .appAndMic(pid: 1)))
+        // Screen Recording is the surviving non-blocking problem for a
+        // microphone-only source: it gates only recordings that open a tap.
+        let result = PermissionHealthCheck.overallHealth(screenRecording: .denied, microphone: .denied)
+        let body = try XCTUnwrap(result.recordingRefusalReason(for: .micOnly))
         XCTAssertTrue(body.contains("Microphone"))
-        XCTAssertFalse(body.contains("Accessibility"))
+        XCTAssertFalse(body.contains("Screen Recording"))
         // The aggregate body is untouched and still names both.
         XCTAssertTrue(result.notificationBody.contains("Microphone"))
-        XCTAssertTrue(result.notificationBody.contains("Accessibility"))
+        XCTAssertTrue(result.notificationBody.contains("Screen Recording"))
     }
 
     func testRefusalReasonNamesEveryBlockingProblem() throws {
@@ -111,13 +93,6 @@ final class RecordingBlockerTests: XCTestCase {
             XCTAssertTrue(problem.blocksRecording(for: app))
             XCTAssertFalse(problem.blocksRecording(for: appOnly))
             XCTAssertTrue(problem.blocksRecording(for: micOnly))
-        }
-
-        // Accessibility feeds participant names only, never a capture channel.
-        for problem in [PermissionProblem.accessibilityDenied, .accessibilityBroken] {
-            for source in [app, appOnly, micOnly] {
-                XCTAssertFalse(problem.blocksRecording(for: source))
-            }
         }
     }
 
