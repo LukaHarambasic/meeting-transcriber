@@ -25,7 +25,7 @@ final class AppAudioCaptureDebugLoggingTests: XCTestCase {
 
     private func makeCapture(debugLogging: Bool = false) -> AppAudioCapture {
         AppAudioCapture(
-            pids: [],
+            target: .processes([]),
             outputFileDescriptor: devNullFD,
             sampleRate: 48000,
             channels: 2,

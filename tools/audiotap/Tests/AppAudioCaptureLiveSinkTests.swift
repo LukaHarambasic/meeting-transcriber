@@ -39,7 +39,7 @@ final class AppAudioCaptureLiveSinkTests: XCTestCase {
         sink: LiveAudioSink? = nil,
     ) -> AppAudioCapture {
         AppAudioCapture(
-            pids: [],
+            target: .processes([]),
             outputFileDescriptor: devNullFD,
             sampleRate: sampleRate,
             channels: channels,

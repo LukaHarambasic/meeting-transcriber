@@ -11,7 +11,7 @@ final class AudioCaptureConfigurationTests: XCTestCase {
     /// recording.
     func testTheOptionalExtrasStartUnset() {
         let config = AudioCaptureConfiguration(
-            pids: [], appOutputURL: nil, micOutputURL: nil, sampleRate: 48000, channels: 2,
+            tapTarget: .processes([]), appOutputURL: nil, micOutputURL: nil, sampleRate: 48000, channels: 2,
         )
 
         XCTAssertNil(config.micDeviceUID, "nil means the system default input")
@@ -30,11 +30,11 @@ final class AudioCaptureConfigurationTests: XCTestCase {
         let mic = URL(fileURLWithPath: "/tmp/stem_mic.wav")
 
         let config = AudioCaptureConfiguration(
-            pids: [7], appOutputURL: app, micOutputURL: mic, sampleRate: 48000, channels: 2,
+            tapTarget: .processes([7]), appOutputURL: app, micOutputURL: mic, sampleRate: 48000, channels: 2,
         )
 
         XCTAssertEqual(config.appOutputURL, app)
         XCTAssertEqual(config.micOutputURL, mic)
-        XCTAssertEqual(config.pids, [7])
+        XCTAssertEqual(config.tapTarget, .processes([7]))
     }
 }
