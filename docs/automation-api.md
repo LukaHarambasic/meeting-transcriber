@@ -63,8 +63,6 @@ per connection; exceeding it closes the connection without sending a response.
 | `GET`  | `/v1/jobs/<id>/naming` | Read the pending speaker-naming choice for a job. |
 | `POST` | `/v1/jobs/<id>/naming` | Confirm speaker names for a job. |
 | `POST` | `/v1/jobs/<id>/naming/skip` | Skip naming for a job (accept auto-assigned names). |
-| `GET`  | `/v1/watch` | Read whether the app is watching for meetings. |
-| `POST` | `/v1/watch` | Start, stop or toggle meeting watching. |
 | `GET`  | `/v1/record` | Read whether a microphone-only recording is running. |
 | `POST` | `/v1/record` | Start, stop or toggle a manual recording (microphone by default; a specific app or the whole system output via `source`). |
 
@@ -206,66 +204,6 @@ Responses:
 - `409 Conflict` if the job exists but is not awaiting naming.
 - `404 Not Found` if the id is unknown.
 
-### GET /v1/watch
-
-Read whether the app is currently watching for meetings. Returns a
-[`WatchStatusDTO`](#watchstatusdto).
-
-```bash
-curl -sS "$BASE/v1/watch" -H "Authorization: Bearer $TOKEN"
-```
-
-Always `200 OK`. Before the app has finished starting up it reports a steady
-"not watching, nothing wrong" state rather than failing, so a client polling on
-an interval never has to special-case launch.
-
-### POST /v1/watch
-
-Start, stop or toggle meeting watching — the same thing the menu bar's *Start
-Watching* item does.
-
-```bash
-curl -sS -X POST "$BASE/v1/watch" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"toggle"}'
-```
-
-`action` is `start`, `stop`, or `toggle`.
-
-Prefer `start`/`stop` over `toggle` for anything that fires from a button, key
-or schedule. A toggle applies a *delta* to a state the caller cannot see
-reliably: if a meeting ended (or you started watching from the menu bar) since
-the caller last looked, a blind toggle does the opposite of what was intended
-and stays inverted until someone notices. `start` and `stop` express the desired
-end state and converge no matter what happened in between.
-
-The response body is a [`WatchStatusDTO`](#watchstatusdto) describing the state
-**after** the action, so a controller can redraw from the response instead of
-racing a follow-up `GET`.
-
-Responses:
-
-- `200 OK` — the request was satisfied. This covers *both* "the state changed"
-  and "it was already like that": asking an already-watching app to `start` is a
-  satisfied request, not an error. A `stop` while a manual recording owns the
-  loop is also `200`: the app is not watching, which is what was asked for.
-  Read `manualRecording` in the body if you need to distinguish that case.
-- `409 Conflict` — refused because a manual (app-picker) recording owns the
-  watch loop, and starting would clobber it. Stop that recording first. The body
-  is still a `WatchStatusDTO`, with `manualRecording: true`, so a client can
-  explain the refusal. Only `start` and a `toggle` that resolves to a start can
-  return this.
-- `503 Service Unavailable` — the action was attempted but the state did not
-  settle within 20 seconds. In practice this means an unanswered microphone
-  permission dialog: the first watch start on a fresh install blocks on it, and
-  on a menu-bar-only app that dialog can sit unnoticed behind other windows.
-  Answer it and retry. Note that a *denied* microphone does not produce a `503`
-  — watching starts regardless, because app audio records without it, so you get
-  `200` with `watching: true`. Check the badge or `permissionsHealthy` for that.
-- `400 Bad Request` — the body is not JSON, or `action` is not one of the three
-  verbs.
-
 ### GET /v1/record
 
 Read whether a microphone-only recording is running. Returns a
@@ -275,22 +213,25 @@ Read whether a microphone-only recording is running. Returns a
 curl -sS "$BASE/v1/record" -H "Authorization: Bearer $TOKEN"
 ```
 
-Always `200 OK`, on the same terms as `GET /v1/watch`: before the app has
-finished starting up it reports a steady "not recording, nothing in the way"
-state rather than failing.
+Always `200 OK`: before the app has finished starting up it reports a steady
+"not recording, nothing in the way" state rather than failing.
 
 ### POST /v1/record
 
-Start, stop or toggle a manual recording. With no `source` (or
-`"source":"mic"`) it records the system microphone with no app audio — the same
-thing the menu bar's *Record Microphone* item does. With `"source":"app"` it
-records a specific process's audio plus the microphone, the same capture the
-menu bar's *Record App…* picker starts. With `"source":"system"` it records the
-**whole system output** plus the microphone — the menu bar's *Record Meeting*
-item, for an in-room meeting where remote participants play through
-loudspeakers and no single app is the audio source. A `system` payload takes no
-`pid`/`appName`/`title`: the recording's identity is fixed ("Meeting" /
-"Meeting Recording").
+Start, stop or toggle a manual recording. Every recording in the app is
+started this way or from the menu bar — there is no meeting auto-detection.
+
+With no `source` (or `"source":"mic"`) it records the microphone with no app
+audio, and no menu bar equivalent — this shape exists only over the API (used
+by the mic-only E2E lane). With `"source":"app"` it records a specific
+process's audio plus the microphone; this also has no menu bar equivalent (the
+app-picker window was removed) and is what the live E2E lanes use to record
+`tools/meeting-simulator`. With `"source":"system"` it records the **whole
+system output** plus the microphone — the same capture the menu bar's single
+**Record** (⌘R) item starts, for a meeting where remote participants play
+through loudspeakers and no single app is the audio source. A `system`
+payload takes no `pid`/`appName`/`title`: the recording's identity is fixed
+("Meeting" / "Meeting Recording").
 
 ```bash
 curl -sS -X POST "$BASE/v1/record" \
@@ -306,8 +247,12 @@ curl -sS -X POST "$BASE/v1/record" \
 ```
 
 `action` is `start`, `stop`, or `toggle`. Prefer `start`/`stop` for anything
-that fires from a button, key or schedule, for the reason spelled out under
-`POST /v1/watch`.
+that fires from a button, key or schedule — a `toggle` applies a *delta* to a
+state the caller cannot see reliably (the recording could have ended, or been
+started from the menu bar, since the caller last looked), so it can do the
+opposite of what was intended and stay inverted until someone notices.
+`start`/`stop` express the desired end state and converge no matter what
+happened in between.
 
 For `"source":"app"`: `pid` is required (its absence is a `400`); `appName`
 (display name in the menu bar, job list and record-only sidecar, default
@@ -315,10 +260,10 @@ For `"source":"app"`: `pid` is required (its absence is a `400`); `appName`
 default: the app name) are optional. Every action is **scoped to the recording
 the payload describes**: a `stop` with `"source":"app"` ends only a manual
 recording of that pid — never a microphone recording, never a recording of
-another app, and never an auto-detected meeting, even of the same app. The
-microphone-shaped payload keeps exactly its old meaning, so existing clients
-are unaffected. An app recording also ends on its own when the target process
-exits, enqueueing normally — automation can rely on that instead of `stop`.
+another app. The microphone-shaped payload keeps exactly its old meaning, so
+existing clients are unaffected. An app recording also ends on its own when
+the target process exits, enqueueing normally — automation can rely on that
+instead of `stop`.
 
 Note that "No Microphone (app audio only)" refuses only microphone starts with
 a `412`; an app-scoped start proceeds under it and records app audio alone.
@@ -333,12 +278,12 @@ Responses:
   is also `200`: no microphone recording is running, which is what was asked
   for, and that other recording is deliberately left alone. This endpoint only
   ever stops the recording it could have started.
-- `409 Conflict` — refused because another recording owns the watch loop: an
-  auto-detected meeting, or an app-picker recording. Starting would clobber it.
-  Stop that recording first, or use `POST /v1/watch` if it is a detected
-  meeting. `otherRecordingActive` is normally `true` in the body; it can read
-  `false` when the conflict is a start that registered moments earlier and has
-  not reached `recording` yet, in which case `startPending` is the one that is
+- `409 Conflict` — refused because another manual recording already owns the
+  loop (the microphone, a different app, or the system-wide **Record**
+  capture). Starting would clobber it — stop that recording first.
+  `otherRecordingActive` is normally `true` in the body; it can read `false`
+  when the conflict is a start that registered moments earlier and has not
+  reached `recording` yet, in which case `startPending` is the one that is
   set. Only `start` and a `toggle` that resolves to a start can return this.
 - `412 Precondition Failed` — refused because nothing would be captured. Either
   "No Microphone (app audio only)" is set in Settings, or the microphone
@@ -360,12 +305,13 @@ Responses:
 Retrying is right for `503` and pointless for `412`. That is the whole reason
 they are separate codes.
 
-**Why a denied microphone is `412` here and `200` on `/v1/watch`.** Watching
-starts fine without the microphone, because app audio still records, so a `200`
-with `watching: true` is the truth there. A microphone-only recording has no
-second channel to fall back on, so the same machine state means nothing at all
-would be captured, and reporting success would be a lie a client could not
-detect until it went looking for the file.
+**Why a denied microphone is `412` for a mic-shaped start but not for an app or
+system one.** An app or system start still captures the process/system audio
+tap regardless of the microphone grant, so a `200` is the truth there (with
+`noMic` effectively forced on for that recording). A microphone-only recording
+has no second channel to fall back on, so the same denied grant means nothing
+at all would be captured, and reporting success would be a lie a client could
+not detect until it went looking for the file.
 
 ## Idempotency
 
@@ -475,50 +421,16 @@ prefix, and bleed that starts later is not seen.
     { "label": "Speaker 1", "suggested": "Alice", "speakingSeconds": 412.5 },
     { "label": "Speaker 2", "suggested": "Speaker 2", "speakingSeconds": 88.0 }
   ],
-  "participants": ["Alice", "Bob"]
+  "participants": []
 }
 ```
 
 `suggested` is the auto-name match (falling back to the label itself when no
-known voice matched). `participants` are the meeting attendees read via
-accessibility, when available. Embeddings and audio are deliberately excluded
-(they are large and carry PII).
-
-### WatchStatusDTO
-
-```json
-{
-  "watching": true,
-  "state": "recording",
-  "badge": "recording",
-  "manualRecording": false,
-  "pendingConsentApp": "Google Chrome",
-  "permissionsHealthy": true
-}
-```
-
-`watching`, `badge`, `manualRecording` and `permissionsHealthy` are always
-present — everything a controller needs to render a button is guaranteed to be
-in every response. `state` and `pendingConsentApp` are nullable and, following
-the same convention as the job DTOs, their keys are **omitted** rather than sent
-as `null` when they have no value. Read them as "absent means none".
-
-- `watching`: whether the watch loop is running and not owned by a manual
-  recording. This is an explicit field rather than something you infer from
-  `state`, so the meaning cannot drift.
-- `state`: `idle`, `watching`, `recording`, or `error`. Absent when no watch loop
-  exists at all (the app is not watching).
-- `badge`: what the menu bar icon is showing: `inactive`, `recording`,
-  `transcribing`, `diarizing`, `processing`, `userAction`, `done`, `error`, or
-  `updateAvailable`. This is the single richest field for a physical button or
-  status display, since it folds the whole pipeline into one glanceable value.
-- `manualRecording`: an app-picker recording owns the loop. Watch control is
-  refused (`409`) while this is true.
-- `pendingConsentApp`: the app name awaiting a browser-meeting consent answer.
-  Absent when no prompt is parked. Resolve it with
-  `POST /action/confirmBrowserConsent`.
-- `permissionsHealthy`: false only when a permission probe has actually failed.
-  A check that has not run yet reports `true`.
+known voice matched). `participants` is always empty today — its only source
+was reading a meeting's attendee roster via Accessibility, removed along with
+meeting auto-detection — but the field stays on the wire for a future roster
+source. Embeddings and audio are deliberately excluded (they are large and
+carry PII).
 
 ### RecordStatusDTO
 
@@ -530,28 +442,34 @@ as `null` when they have no value. Read them as "absent means none".
   "badge": "recording",
   "otherRecordingActive": false,
   "noMic": false,
-  "microphoneHealthy": true
+  "microphoneHealthy": true,
+  "screenRecordingHealthy": true
 }
 ```
 
-`recording`, `startPending`, `badge`, `otherRecordingActive`, `noMic` and
-`microphoneHealthy` are always present. `state` is nullable and its key is **omitted** rather than sent
-as `null`, following the same convention as the other DTOs.
+`recording`, `startPending`, `badge`, `otherRecordingActive`, `noMic`,
+`microphoneHealthy` and `screenRecordingHealthy` are always present. `state` is
+nullable and its key is **omitted** rather than sent as `null`, following the
+same convention as the other DTOs.
 
 - `recording`: whether a **microphone-only** recording is in progress.
-  Deliberately narrower than "something is recording": an app-picker recording
-  and an auto-detected meeting are reported by `otherRecordingActive` instead,
-  so a client is never invited to `stop` a recording it did not start.
+  Deliberately narrower than "something is recording": an app or system
+  recording started via this same endpoint is reported by
+  `otherRecordingActive` instead, so a client is never invited to `stop` a
+  recording it did not start.
 - `startPending`: a start has been accepted but is not recording yet. It waits
   on the microphone permission gate, which on a first run means an OS dialog
   somebody has to answer, so this window is not always short. Without this field
   a poller would read it as plain idle and press again.
-- `state`: `idle`, `watching`, `recording`, or `error`. Absent when no watch loop
-  exists at all.
-- `badge`: what the menu bar icon is showing. Same values as in
-  [`WatchStatusDTO`](#watchstatusdto).
-- `otherRecordingActive`: some other capture owns the watch loop. A `start` is
-  refused with `409` while this is true.
+- `state`: `WatchLoop.State`'s raw value — `idle`, `recording`, or `error`.
+  Absent when no recording session has ever been created.
+- `badge`: what the menu bar icon is showing: `inactive`, `recording`,
+  `transcribing`, `diarizing`, `processing`, `userAction`, `done`, `error`, or
+  `updateAvailable`. This is the single richest field for a physical button or
+  status display, since it folds the whole pipeline into one glanceable value.
+- `otherRecordingActive`: some other manual recording (a different source, or
+  a different app pid) owns the loop. A `start` is refused with `409` while
+  this is true.
 - `noMic`: the "No Microphone (app audio only)" setting is on. A `start` is
   refused with `412` while this is true.
 - `microphoneHealthy`: false only when a microphone probe has actually failed
@@ -575,9 +493,9 @@ as `null`, following the same convention as the other DTOs.
 | `401` | Missing or wrong bearer token. |
 | `403` | Rejected by the Origin or Host guard. |
 | `404` | Unknown job id. Also `GET /v1/jobs/<id>/naming` when the job is not awaiting naming (the GET folds wrong-state into `404`; the POST naming routes use `409` instead). |
-| `409` | Confirm/skip naming on a job that exists but is not awaiting naming. Also `POST /v1/watch` while a manual recording owns the watch loop, and `POST /v1/record` while any other recording owns it. |
+| `409` | Confirm/skip naming on a job that exists but is not awaiting naming. Also `POST /v1/record` while any other manual recording owns the loop. |
 | `412` | `POST /v1/record` only: nothing would be captured. For a mic start: "No Microphone" is set, or the mic permission is denied/broken. For an `app`/`system` start: the Screen Recording grant (the tap's preflightable proxy) is denied/broken — read `screenRecordingHealthy`. Stable until a setting changes, so do not retry. |
-| `503` | `POST /v1/watch` and `POST /v1/record`: the action was attempted and did not take. On `/v1/watch` that means the state did not settle within 20 seconds; on `/v1/record` also a recorder that would not start, or a stop whose audio could not be handed to the pipeline. Retryable, unlike `412`. On `/v1/watch` a *denied* microphone gives `200`, not this; on `/v1/record` it gives `412`. |
+| `503` | `POST /v1/record`: the start was attempted and did not settle within 20 seconds, the recorder itself refused to start, or a stop whose audio could not be handed to the pipeline. Retryable, unlike `412`. |
 
 ## Typical flows
 
@@ -605,14 +523,15 @@ while :; do
 done
 ```
 
-**Control watching from a script, hotkey or button:**
+**Control a recording from a script, hotkey or button:**
 
 ```bash
 # Read it (safe to poll on an interval — the payload is small and stable).
-curl -sS "$BASE/v1/watch" -H "Authorization: ******"
+curl -sS "$BASE/v1/record" -H "Authorization: ******"
 
-# Ask for a state, don't flip one. See POST /v1/watch for why.
-curl -sS -X POST "$BASE/v1/watch" \
+# Ask for a state, don't flip one — a blind toggle does the wrong thing if the
+# recording already ended (or was started from the menu bar) since the last read.
+curl -sS -X POST "$BASE/v1/record" \
   -H "Authorization: ******" -H "Content-Type: application/json" \
   -d '{"action":"start"}'
 ```
@@ -620,10 +539,10 @@ curl -sS -X POST "$BASE/v1/watch" \
 Or via the bundled CLI, which handles the token and base URL for you:
 
 ```bash
-mt-cli watch          # status
-mt-cli watch start
-mt-cli watch stop
-mt-cli watch toggle
+mt-cli record          # status
+mt-cli record start
+mt-cli record stop
+mt-cli record toggle
 ```
 
 **Record an in-person meeting:**
@@ -639,19 +558,32 @@ The recording then goes through the normal pipeline and shows up as a job, so
 an imported file. Stop on a `412`: it means nothing is being captured, and the
 answer will not change on a retry.
 
-For wiring this to a physical button — a Stream Deck key, a Shortcut, a global
-hotkey — see [`docs/stream-deck.md`](stream-deck.md), which covers the launcher
-side.
+### Wiring a physical button
+
+Everything above works from a Stream Deck key, a Shortcut, Raycast, Alfred,
+Hammerspoon, or a `.zshrc` alias — anything that can run a command:
+
+```bash
+TOKEN=$(cat "$HOME/Library/Application Support/MeetingTranscriber/.rpc-token")
+curl -sS --fail-with-body -X POST http://127.0.0.1:9876/v1/record \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"start"}'
+```
+
+Bind two keys (start / stop) rather than one `toggle` key where you can — see
+above for why. If you have the repo checked out, `mt-cli` is shorter and finds
+the token itself (`mt-cli record start`).
 
 ## Notes and limitations
 
-- **Starting watching can trigger a system permission prompt.** The first
-  `POST /v1/watch` with `start` on a fresh install asks for microphone (and
-  possibly Screen Recording) access, which surfaces as a macOS dialog. Triggered
-  from a button press or a schedule that dialog arrives unannounced, so grant
-  the permissions once interactively before relying on remote control. Check
-  `permissionsHealthy` in the response to detect the state where the app cannot
-  actually record.
+- **Starting a recording can trigger a system permission prompt.** The first
+  `POST /v1/record` `start` on a fresh install asks for microphone (and, for an
+  `app`/`system` start, possibly Screen Recording) access, which surfaces as a
+  macOS dialog. Triggered from a button press or a schedule that dialog arrives
+  unannounced, so grant the permissions once interactively before relying on
+  remote control. Check `microphoneHealthy` / `screenRecordingHealthy` in the
+  response to detect the state where the app cannot actually record.
 - **Speaker DB is read-only on the headless path.** The blocking
   `POST /v1/transcribe` path recognizes already-enrolled voices but does not
   enroll new speakers or write recognition stats. (The interactive
@@ -660,36 +592,21 @@ side.
   improve its own speaker DB through this API. An opt-in auto-enroll mode is a
   possible follow-up.
 - **Polling only.** There is no push/webhook/SSE callback in v1; clients poll
-  `GET /v1/jobs/<id>`, or `GET /v1/watch` for the watching state. Push delivery
+  `GET /v1/jobs/<id>`, or `GET /v1/record` for the recording state. Push delivery
   is a known deferred item. On loopback a 3–5 s poll costs effectively nothing.
 - **No file upload.** The `path` must already be readable on the host running the
   app. Cross-host submission (multipart upload, no shared filesystem) is not part
   of v1.
-- **A microphone recording has no end signal of its own.** An app recording ends
-  when the app quits and a detected meeting ends when the meeting does, but a
-  room has no process to watch, so `POST /v1/record` with `stop` is the only way
-  it ends short of the duration cap. A caller that starts one owns stopping it.
-- **A refused start puts watching back, a successful one does not.** Taking the
-  loop for a recording stops meeting detection; when the start is then refused
-  (`412`) or fails (`503`), detection is restored, so a refusal really does
-  leave the machine as it found it. A start that succeeds does not, which is the
-  next bullet.
-- **Recording the microphone turns meeting watching off, and stopping does not
-  turn it back on.** A recording takes over the watch loop, so after a
-  `start`/`stop` pair the app is idle even on a machine set to watch
-  automatically. Same for the app-picker recording in the menu bar; it is just
-  easier to miss over the API, where nobody is looking at the menu bar icon.
-  Follow a `stop` with `POST /v1/watch {"action":"start"}` if the app should keep
-  watching.
-- **A crash during a microphone recording loses the track.** Recovery on the
-  next launch keys on artefacts an app-audio tap leaves behind, and a
-  microphone-only recording leaves none. Known limitation, not a regression.
-- **`mt-cli` covers inspection plus watch and record control.** The bundled
+- **A microphone-only or system recording has no end signal of its own.** An
+  app recording ends when the target process quits, but a microphone-only or
+  system recording has no process to watch, so `POST /v1/record` with `stop`
+  (or the menu bar's Stop Recording) is the only way it ends short of the
+  duration cap. A caller that starts one owns stopping it.
+- **`mt-cli` covers inspection plus record control.** The bundled
   `tools/mt-cli` client wraps the debug endpoints (`state`, `healthz`,
-  `screenshot`, `open-settings`, `close-settings`) plus `mt-cli watch` and
-  `mt-cli record`; an `mt-cli transcribe` front for the job endpoints is a
-  planned follow-up. For now drive the rest of `/v1` with `curl` or any HTTP
-  client.
+  `screenshot`, `open-settings`, `close-settings`) plus `mt-cli record`; an
+  `mt-cli transcribe` front for the job endpoints is a planned follow-up. For
+  now drive the rest of `/v1` with `curl` or any HTTP client.
 
 ## See also
 

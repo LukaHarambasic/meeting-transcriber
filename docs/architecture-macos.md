@@ -2,7 +2,7 @@
 
 ## Overview
 
-Native SwiftUI menu bar application that orchestrates meeting detection, recording, transcription, diarization, and protocol generation. Runs a background watch loop (`WatchLoop`) polling for active meetings and implementing a complete end-to-end pipeline.
+Native SwiftUI menu bar application that orchestrates recording, transcription, diarization, and protocol generation. Every recording is user-initiated — the menu bar's single **Record** action, or the `/v1/record` automation API — and drives a complete end-to-end pipeline via `WatchLoop`, a manual-recording session driver (not a poll loop, despite the name).
 
 **Key pattern:** Observable state models (`@Observable`) with PipelineQueue for decoupled post-processing.
 
@@ -39,20 +39,20 @@ Native SwiftUI menu bar application that orchestrates meeting detection, recordi
                          ▼
                 ┌─────────────────────────────────────────────────┐
                 │           WatchLoop (@MainActor)                │
-                │   idle → watching → recording → watching        │
+                │   idle → recording → idle                       │
+                │   manual-recording session driver, no poll loop  │
                 └────┬───────────────┬────────────────────┬───────┘
-                     │ polls         │ starts/stops       │ enqueues
+                     │ starts        │ starts/stops       │ enqueues
                      ▼               ▼                    ▼
         ┌─────────────────────┐  ┌────────────────┐  ┌────────────────────┐
-        │ MeetingDetecting    │  │ DualSource-    │  │   PipelineQueue    │
-        │  • MeetingDetector  │  │   Recorder     │  │   (@MainActor)     │
-        │    (CGWindowList +  │  │                │  │                    │
-        │     regex)          │  │  AudioTapLib   │  │  Sequential job    │
-        │  • PowerAssertion-  │  │  (CATap +      │  │  processing →      │
-        │    Detector (IOKit, │  │   AVAudioEng.) │  │  see breakdown     │
-        │    sandbox-safe)    │  │  + AudioMixer  │  │  below             │
-        │  • MicInputDetector │  │                │  │                    │
-        │    (CoreAudio proc) │  │                │  │                    │
+        │ Manual trigger      │  │ DualSource-    │  │   PipelineQueue    │
+        │  • Menu bar "Record" │  │   Recorder     │  │   (@MainActor)     │
+        │    (⌘R) — system     │  │                │  │                    │
+        │    mixdown + mic     │  │  AudioTapLib   │  │  Sequential job    │
+        │  • POST /v1/record   │  │  (CATap +      │  │  processing →      │
+        │    (mic/app/system,  │  │   AVAudioEng.) │  │  see breakdown     │
+        │    e.g. Stream Deck) │  │  + AudioMixer  │  │  below             │
+        │                      │  │                │  │                    │
         └─────────────────────┘  └────────────────┘  └─────────┬──────────┘
                                                                │
         PipelineQueue per-job processing:                      │
@@ -91,11 +91,10 @@ State writes to `AppPaths.dataDir`; IPC + queue snapshots to `ipcDir`.
 | `AppState.swift` | `@Observable @MainActor` composition root — wires the concern controllers (`engines`, `watching`, `pipeline`, `permissions`, `channelHealth`, `liveTranscription`, `rpcController`) and exposes the derived UI state (badge, status label) rather than owning it |
 | `MenuBarView.swift` | Menu bar dropdown (state, actions, meeting info) |
 | `MenuBarIcon.swift` | Renders the animated waveform icon + badge overlays (permission, record-only, channel-silent) |
-| `AppPickerView.swift` | App picker sheet for manual recording of any running app |
 | `AudioImportTypes.swift` | File types offered by the batch-import and voice-enrollment `NSOpenPanel`s — single source of truth so the ffmpeg-gated vs. natively-decoded format lists stay pinned and testable |
 | `A11yID.swift` | Shared accessibility-identifier namespace — one constant per control, referenced by the view modifier, ViewInspector tests, and the `/ui/press` allowlist |
 | `SettingsView.swift` | Settings window — `TabView` shell hosting six topic-grouped sub-views in `Sources/Settings/` |
-| `Settings/GeneralSettingsView.swift` | Mode (Record-only) · Apps to Watch (Teams/Zoom/Webex/Browser/WeChat/Tencent Meeting/FaceTime/WhatsApp) · Detection (Poll Interval, Grace Period) · Updates |
+| `Settings/GeneralSettingsView.swift` | Mode (Record-only) · Updates |
 | `Settings/AudioSettingsView.swift` | Microphone device · VAD (enabled + threshold) · Per-Channel Indicator |
 | `Settings/TranscriptionSettingsView.swift` | ASR engine picker · engine-specific options · model status · Live transcription (PoC) toggle |
 | `Settings/SpeakersSettingsView.swift` | Diarization · Mic Speaker Name · Known Voices · Recognition Stats · Experimental Diarization Tuning |
@@ -122,21 +121,13 @@ State writes to `AppPaths.dataDir`; IPC + queue snapshots to `ipcDir`.
 
 | File | Role |
 |------|------|
-| `WatchLoop.swift` | Main orchestrator: detect → record → enqueue PipelineJob |
-| `WatchLoopEndPolicy.swift` | Pure decision logic for `waitForMeetingEnd` (grace-period / max-duration) |
+| `WatchLoop.swift` | Manual-recording session driver: start (menu bar or `/v1/record`) → record → enqueue PipelineJob. Not a poll loop despite the name |
 | `WatchLoopState.swift` | Value-type snapshot of `WatchLoop`'s observable fields (for tests and RPC) |
+| `ManualRecordingInfo.swift` | What the user asked to record: target pid (nil for mic-only/system), display name, title |
+| `ManualRecordingRequest.swift` | The three recordable shapes (`.microphone` / `.app` / `.meeting`) the menu and `/v1/record` both resolve to before calling into `WatchLoop` |
+| `RecordingSource.swift` | What one recording actually captures (`.appAndMic` / `.appOnly` / `.micOnly` / `.systemAndMic` / `.systemOnly`), honouring "No Microphone" |
 | `ManualRecordingMonitorPolicy.swift` | Pure decision logic for manual recording stop conditions (process-died vs max-duration) |
-| `MeetingDetecting.swift` | `MeetingDetecting` protocol + `DetectedMeeting` model |
-| `MeetingDetector.swift` | Window title polling, pattern matching, confirmation counting, cooldown |
-| `MeetingTitleMatcher.swift` | Compiled idle/meeting title regex semantics for one `AppMeetingPattern` |
-| `PowerAssertionDetector.swift` | IOKit power assertion–based meeting detection (sandbox-safe); carries the Chrome WebRTC pattern for browser meetings (issue #503) |
-| `MicInputDetector.swift` | Third `MeetingDetecting` strategy: watches which processes hold `kAudioProcessPropertyIsRunningInput` via the Core Audio process-object API — covers call apps (WeChat, Tencent Meeting, FaceTime, WhatsApp) with no reliable power-assertion signal; each app opt-in and off by default |
-| `MeetingPatterns.swift` | Regex patterns for Teams, Zoom, Webex, browser (Chrome WebRTC) |
-| `BrowserConsentPolicy.swift` | Pure decision logic for the browser-meeting "ask before recording" prompt — decline cooldown (issue #503) |
-| `ConsentAnswer.swift` | Three-way outcome of a consent prompt (yes / no / unanswered) — kept distinct from a `Bool` so a decline and a timeout get different re-prompt cooldowns (issue #543) |
-| `BrowserConsentReadiness.swift` | Whether a browser-meeting consent prompt can actually reach the user — polls `NotificationVisibility` since the prompt is itself a notification and a broken notification channel can't report its own brokenness |
-| `ConsentPromptCoordinator.swift` | Coordinates an async yes/no recording-consent prompt: register pending decision by id, resolve once via answer or timeout |
-| `WatchLoop+Consent.swift` | Browser-meeting consent gate, split out of `WatchLoop`; only patterns with `requiresRecordingConsent` reach it |
+| `WatchingController+RecordControl.swift` | The `/v1/record` control surface: idempotent start/stop/toggle scoped to the recording a payload describes, ownership guards (409), ".refused" (412) vs ".failed" (503) |
 | `DualSourceRecorder.swift` | Orchestrates AudioTapLib capture + mic, mixes tracks |
 | `RecordingProvider.swift` | Protocol abstraction over `DualSourceRecorder` for mock injection in `WatchLoop` tests |
 | `WatchLoop+RecordOnly.swift` | Record-only output branch (moves WAVs + writes `RecordingSidecar`), split out of `WatchLoop` |
@@ -250,18 +241,16 @@ State writes to `AppPaths.dataDir`; IPC + queue snapshots to `ipcDir`.
 |------|------|
 | `TranscriberStatus.swift` | Status + state enum models |
 | `AppPaths.swift` | Centralized path constants (ipcDir, dataDir, logSubsystem, speakersDB) |
-| `AXHelper.swift` | Shared accessibility API helper (MuteDetector + ParticipantReader) |
+| `AXHelper.swift` | Shared accessibility API helper backing the debug RPC's self-pid UI-tree inspection (`/ui/tree`, `/ui/press`) — self-inspection needs no Accessibility TCC grant |
 | `NotificationManager.swift` | macOS notifications |
 | `NotificationScheduling.swift` | Port over the `UNUserNotificationCenter` slice `NotificationManager` uses, so posting/registration is testable against a fake scheduler |
 | `NotificationRingBuffer.swift` | Bounded, thread-safe log of recently-posted notifications (`#if !APPSTORE`) |
 | `DateFormatter+FilenameStamp.swift` | `DateFormatter` pinned to Gregorian calendar + POSIX locale for filename timestamp stamps |
 | `KeychainHelper.swift` | Legacy keychain CRUD (token now file-based) |
 | `RecognitionStats.swift` | Recognition event model + `recognition_log.jsonl` reader/writer — backs `RecognitionStatsView` |
-| `Permissions.swift` | Mic/accessibility permissions, project root detection |
+| `Permissions.swift` | Mic/Screen Recording permission helpers, project root detection |
 | `PermissionRow.swift` | Permission status row UI component (icon, detail, help popover) |
 | `PermissionHealthCheck.swift` | TCC verdict + live probe → `PermissionStatus`; drives exclamation badge overlay |
-| `NotificationVisibility.swift` | What the notification centre will actually *do* with a posted notification (alert style, Time Sensitive, scheduled delivery) — authorisation alone can read `.authorized` while the prompt never shows |
-| `ParticipantReader.swift` | Teams participant extraction via Accessibility API |
 | `DebugRPCServer.swift` | Embedded HTTP RPC server core (routing, auth) for shell-driven inspection. `#if !APPSTORE`, opt-in via `MEETINGTRANSCRIBER_DEBUG_RPC=1`. Bearer-token + Origin reject; binds 127.0.0.1 only. Endpoint handlers split into companion files below (line-cap) |
 | `DebugRPCServer+V1.swift` | `/v1` versioned automation API routing + response envelopes (`POST /v1/transcribe`, `/v1/jobs`, naming) |
 | `DebugRPCServer+Metrics.swift` | `GET /metrics` handler — cumulative CPU/RAM/instruction counters via `proc_pid_rusage` |
@@ -295,15 +284,15 @@ State writes to `AppPaths.dataDir`; IPC + queue snapshots to `ipcDir`.
 
 | Path | Role |
 |------|------|
-| `tools/mt-cli/` | Thin Swift client for `DebugRPCServer`. Subcommands: `state`, `healthz`, `screenshot`, `open-settings`, `close-settings`, `confirm-browser-consent`, `wav-verdict`, `seed-speaker`, `rename-speaker`, `delete-speaker`, `merge-speakers`, `ui-tree`, `ui-press`. Reads token from `~/Library/Application Support/MeetingTranscriber/.rpc-token`. Skill doc at `tools/mt-cli/skill.md`. |
-| `tools/meeting-simulator/` | Test fixture: spawns a fake meeting window for E2E detection tests |
+| `tools/mt-cli/` | Thin Swift client for `DebugRPCServer`. Subcommands: `state`, `healthz`, `screenshot`, `open-settings`, `close-settings`, `record`, `wav-verdict`, `seed-speaker`, `rename-speaker`, `delete-speaker`, `merge-speakers`, `ui-tree`, `ui-press`. Reads token from `~/Library/Application Support/MeetingTranscriber/.rpc-token`. Skill doc at `tools/mt-cli/skill.md`. |
+| `tools/meeting-simulator/` | Test fixture: plays a fixture WAV through the system output (real audio for the CATap to capture) and holds a power assertion; the live E2E lanes record its process via `POST /v1/record` (`source: "app"`) rather than triggering detection |
 
 ---
 
 ## State Machine
 
 ```
-WatchLoop:     idle → watching → recording → watching (enqueues PipelineJob)
+WatchLoop:     idle → recording → idle (enqueues PipelineJob), or → error
 PipelineQueue: waiting → transcribing → [diarizing] → generatingProtocol → done (60s auto-remove)
                                                                             ↳ error
 ```
@@ -318,7 +307,7 @@ PipelineQueue: waiting → transcribing → [diarizing] → generatingProtocol �
 
 | State | GIF | Triggered by | Code path |
 |-------|-----|--------------|-----------|
-| **Idle** | <img src="menu-bar-idle.gif" width="60"> | `WatchLoop.state == .idle / .watching` and `PipelineQueue` empty | `BadgeKind.inactive` |
+| **Idle** | <img src="menu-bar-idle.gif" width="60"> | `WatchLoop.state == .idle` and `PipelineQueue` empty | `BadgeKind.inactive` |
 | **Recording** | <img src="menu-bar-recording.gif" width="60"> | `WatchLoop.state == .recording` (waveform bars bounce) | `BadgeKind.recording` |
 | **Transcribing** | <img src="menu-bar-transcribing.gif" width="60"> | `PipelineJob.state == .transcribing / .recordingDone` (bars morph into text glyphs) | `BadgeKind.transcribing` |
 | **Diarizing** | <img src="menu-bar-diarizing.gif" width="60"> | `PipelineJob.state == .diarizing` (bars split into colored speaker groups) | `BadgeKind.diarizing` |
@@ -332,7 +321,7 @@ The icon is rendered as a SwiftUI `Image` template (auto-tinted by AppKit for li
 <img src="menu-bar-permission.gif" width="80" alt="Permission problem badge">
 </p>
 
-A red circle with a white "!" is composited in the bottom-right corner by `MenuBarIcon.drawExclamationBadge` whenever `PermissionHealthCheck` reports any of Microphone / Screen Recording / Accessibility as `.denied` or `.broken`. The overlay sits **on top of whatever primary state animation** is currently active — the user still sees what the app is doing while being told something is wrong. See "Permission health check + badge overlay" below for the full health-check semantics.
+A red circle with a white "!" is composited in the bottom-right corner by `MenuBarIcon.drawExclamationBadge` whenever `PermissionHealthCheck` reports Microphone or Screen Recording as `.denied` or `.broken`. The overlay sits **on top of whatever primary state animation** is currently active — the user still sees what the app is doing while being told something is wrong. See "Permission health check + badge overlay" below for the full health-check semantics.
 
 ### Record-only mode badge
 
@@ -340,7 +329,7 @@ A red circle with a white "!" is composited in the bottom-right corner by `MenuB
 <img src="menu-bar-record-only.gif" width="80" alt="Record-only mode">
 </p>
 
-A persistent small red dot in the bottom-right corner indicates that **Record-only mode** is enabled (`AppSettings.recordOnly == true`). In this mode `WatchLoop.enqueueRecording()` moves dual-source WAVs into `<outputDir>/recordings/` together with a `<basename>_meta.json` `RecordingSidecar` and skips the entire post-processing pipeline (VAD, transcription, diarization, protocol). Intended for fleet topologies where macOS clients capture and a separate machine (e.g. a Linux GPU host via Syncthing) processes the audio. The sidecar's `trigger` field (`auto` | `manual`, schema version 2) tells that consumer which call site produced the recording, so it can treat a short auto-detected capture (likely a false trigger) differently from a short deliberate manual one.
+A persistent small red dot in the bottom-right corner indicates that **Record-only mode** is enabled (`AppSettings.recordOnly == true`). In this mode `WatchLoop.enqueueRecording()` moves dual-source WAVs into `<outputDir>/recordings/` together with a `<basename>_meta.json` `RecordingSidecar` and skips the entire post-processing pipeline (VAD, transcription, diarization, protocol). Intended for fleet topologies where macOS clients capture and a separate machine (e.g. a Linux GPU host via Syncthing) processes the audio. The sidecar's `trigger` field (`auto` | `manual`, schema version 2) tells that consumer which call site produced the recording; every recording written today is `manual` — `auto` is kept only for schema compatibility with sidecars written before meeting auto-detection was removed.
 
 Like the permission badge, the dot is rendered as a persistent overlay on top of whatever primary animation is currently active — so the mode is always clearly indicated whether the app is idle, recording, or running anything else. **Precedence:** when both apply, the red exclamation (permission badge) wins, because a permission problem actually breaks recording while record-only is a deliberate user choice.
 
@@ -373,7 +362,7 @@ AudioTapLib (CATapDescription)
 └─ Metadata: micDelay, actualSampleRate, actualChannels via AudioCaptureResult
 ```
 
-**Key:** CATapDescription requires NO Screen Recording permission (purple dot indicator only). Handles output device changes by recreating tap automatically.
+**Key:** the CATapDescription process/system tap is TCC-gated by the `NSAudioCaptureUsageDescription` "Audio Recording" grant, or, as a fallback, the Screen Recording grant (purple dot indicator when granted via the audio-capture entitlement). With neither grant, the tap returns `noErr` but captures silence — no error, nothing logged (issue #524). Handles output device changes by recreating tap automatically.
 
 **Restart bounding (issue #588):** a device-change restart on either channel can wedge inside AVFAudio/CoreAudio and never return (e.g. `AVAudioEngine.inputNode` looping on a dangling Bluetooth sub-device held by coreaudiod). `RestartArbiter` bounds how long a single restart attempt may run — attempts carry a generation and run off the main queue, so a result from a wedged attempt that eventually returns is rejected rather than adopted. `CaptureRestartRetryPolicy` bounds how many attempts are made and is shared by both channels. A channel that gives up tells the user directly (`AudioCaptureSession`/`DualSourceRecorder` expose which one) instead of only decaying to silence, which the asymmetric-silence detector would otherwise misreport as a routing/mute problem rather than a channel that is gone for good.
 
@@ -498,9 +487,14 @@ When dual-source recording (app + mic) is available:
 1. Transcribe app/mic tracks separately → "Remote" / micLabel segments
 2. Diarize app track and mic track separately via FluidAudio
 3. `mergeDualTrackDiarization()` — prefix speaker IDs (`R_` for remote, `M_` for local), merge segments by time
-4. `preMatchParticipants()` — heuristic assignment of Teams participants to unmatched speakers by speaking time
-5. Speaker naming UI — all speakers editable with participant suggestions
-6. `assignSpeakersDualTrack()` — app segments matched against app diarization, mic segments against mic diarization
+4. Speaker naming UI — all speakers editable, pre-filled from `SpeakerMatcher`'s voice-recognition suggestions
+5. `assignSpeakersDualTrack()` — app segments matched against app diarization, mic segments against mic diarization
+
+`SpeakerMatcher.preMatchParticipants()` (heuristic assignment of a meeting's attendee roster to
+unmatched speakers) is now unreachable in practice: every `PipelineJob` is built with an empty
+`participants` list, since its only source was Teams roster reading via Accessibility, removed
+along with meeting auto-detection. The function stays for a future roster source rather than being
+deleted outright.
 
 **Single-source fallback:** When only mix audio is available, diarize the mix and use `assignSpeakers()` with nearest-segment fallback.
 
@@ -519,7 +513,7 @@ When dual-source recording (app + mic) is available:
 - **`.openAICompatible`** — Any OpenAI-compatible HTTP API (Ollama, LM Studio, llama.cpp, etc.)
 - **`.none`** — Skip LLM generation; save transcript only
 
-`AppSettings.protocolLanguage` (default `"German"`) is substituted into the prompt as `{LANGUAGE}`. Custom prompts can also use `{MEETING_DATE}` (`YYYY-MM-DD`) and `{MEETING_TIME}` (`HH:mm`), derived from the captured recording start time. Imports and recovery jobs resolve those time placeholders to `Unknown` rather than their enqueue or processing time. Only recordings with a captured start receive the authoritative meeting-metadata block, so existing custom prompts receive reliable temporal context without needing to add the placeholders.
+`AppSettings.protocolLanguage` (default `"English"` in this personal variant — upstream defaults to `"German"`) is substituted into the prompt as `{LANGUAGE}`. Custom prompts can also use `{MEETING_DATE}` (`YYYY-MM-DD`) and `{MEETING_TIME}` (`HH:mm`), derived from the captured recording start time. Imports and recovery jobs resolve those time placeholders to `Unknown` rather than their enqueue or processing time. Only recordings with a captured start receive the authoritative meeting-metadata block, so existing custom prompts receive reliable temporal context without needing to add the placeholders.
 
 ### Claude CLI Invocation
 
@@ -583,15 +577,12 @@ AppSettings (UserDefaults)
 
 | Component | Injection Point |
 |-----------|----------------|
-| MeetingDetector | `windowListProvider` closure (mock window list) |
-| PowerAssertionDetector | `assertionProvider` + `windowListProvider` closures |
-| MicInputDetector | `processProvider` + `windowListProvider` closures |
 | DiarizationProvider | `diarizationFactory` closure in PipelineQueue |
 | ProtocolGenerating | `protocolGenerator` protocol in PipelineQueue |
 | RecordingProvider | `recorderFactory` closure in WatchLoop |
 | ProtocolGenerator | `claudeBin` parameter |
 | NotificationManager | `NotificationScheduling` port over `UNUserNotificationCenter` (fake scheduler in tests) |
-| ConsentPromptCoordinator | Injected timeout clock; pure register/resolve-once API (no UI dependency) |
+| PermissionsController | `probe` closure over `PermissionHealthCheck.runLive()` |
 | LiveCaptionsGate.strategy | Pure static function — call directly with any input combination, no controller needed |
 | AppNotifying | `notifier` parameter in `AppState.init` (`SilentNotifier` default, `RecordingNotifier` in tests) |
 | BadgeKind.compute | Pure static function — call directly with any input combination, no WatchLoop needed |
@@ -603,16 +594,15 @@ AppSettings (UserDefaults)
 
 | Permission | Required For | Notes |
 |------------|-------------|-------|
-| Screen Recording | Meeting detection (window titles) | CGWindowListCopyWindowInfo |
+| Screen Recording | Fallback for the app-audio process/system tap when the "Audio Recording" grant is absent | Gates an `app`/`system` recording; a mic-only recording never opens a tap |
 | Microphone | Mic recording | AVAudioEngine |
-| Accessibility | Mute detection, participant reading | Teams AX tree |
-| None | App audio capture | CATapDescription (purple dot only) |
+| None | App audio capture | CATapDescription (purple dot when granted via the audio-capture entitlement) |
 
 ### Permission health check + badge overlay
 
-`PermissionHealthCheck` verifies each of the three TCC permissions by combining the system verdict with a live probe (e.g. `CGWindowListCopyWindowInfo` returning non-empty window titles for Screen Recording). Each permission resolves to `PermissionStatus.healthy | .denied | .broken | .notDetermined` — `.broken` means "TCC says allowed but the probe disagrees," which happens when macOS hasn't actually wired the permission through and the user needs to toggle it off and on in System Settings.
+`PermissionHealthCheck` verifies each of the two TCC permissions (Microphone, Screen Recording — Accessibility was removed along with meeting auto-detection; its only consumer was the Teams participant/mute reader) by combining the system verdict with a live probe. Each permission resolves to `PermissionStatus.healthy | .denied | .broken | .notDetermined` — `.broken` means "TCC says allowed but the probe disagrees," which happens when macOS hasn't actually wired the permission through and the user needs to toggle it off and on in System Settings.
 
-`WatchLoop` runs the check on startup and `AppState` re-runs it on app activation. When the result is unhealthy:
+`AppState`'s `PermissionsController` runs the check at launch and re-runs it, debounced, on app activation. `WatchLoop` separately gates each manual-recording start against the same check, scoped to what that recording actually opens. When the result is unhealthy:
 
 1. `MeetingTranscriberApp` passes `permissionOverlay: true` to `MenuBarIcon.image(...)`, which composites a red circle with a white "!" in the bottom-right corner over the current badge (`MenuBarIcon.drawExclamationBadge`). This bypasses the cached template icons and renders a non-template image because the overlay must stay red in both light and dark mode.
 2. `BadgeKind.compute(...)` returns `.error` when idle-with-problem, so the icon also reflects the problem state when no job is active.
@@ -632,12 +622,12 @@ The overlay lives over the *currently active* animation (idle, recording, transc
 
 | Tab | Sections | Bindings | Local state |
 |---|---|---|---|
-| **General** | Apps to Watch · Detection · Updates | `settings`, `updateChecker?` | — |
+| **General** | Mode (Record-only) · Updates | `settings`, `updateChecker?` | — |
 | **Audio** | Microphone · VAD | `settings` | `audioDevices` |
 | **Transcription** | Engine + per-engine options + status | `settings`, three engines | — |
 | **Speakers** | Diarization · Speaker Identity · Known Voices · Recognition Stats · Experimental Diarization Tuning | `settings`, `recognitionStatsLog`, `enrollmentDiarizerFactory` | `knownVoicesSheet` |
 | **Output** | LLM Provider · Protocol Language · Output Folder · Prompt | `settings` | `claudeBinaries` (#if !APPSTORE), connection-test state, `availableModels`, `hasCustomPrompt` |
-| **Advanced** | Permissions · Diagnostics · About | — | `micPermission`, `screenRecordingOK`, `accessibilityOK` |
+| **Advanced** | Permissions · Diagnostics · About | — | `micPermission`, `screenRecordingOK` |
 
 **Conditional rendering rules:**
 - `noMic` hides the mic-device picker (Audio) and the Speaker Identity section (Speakers)
@@ -657,12 +647,12 @@ The overlay lives over the *currently active* animation (idle, recording, transc
 ## Key Architectural Decisions
 
 1. **@Observable over @StateObject** — Fine-grained reactivity, macOS 14+
-2. **PipelineQueue decoupling** — Recording and post-processing run independently; WatchLoop enqueues jobs and resumes watching
+2. **PipelineQueue decoupling** — Recording and post-processing run independently; `WatchLoop` enqueues a job and returns to idle
 3. **AudioTapLib as SPM library** — Direct in-process audio capture via CATapDescription (App Store compatible)
 4. **Dual-source recording** — Enables speaker separation without diarization (app=Remote, mic=Me)
-5. **Graceful degradation** — Diarization optional, mute detection optional, continues on partial failure
-6. **Pre-loaded model** — Selected engine (WhisperKit or Parakeet) loaded at app launch, prevents delay on first meeting
-7. **5s cooldown** — Prevents re-detecting same meeting after handling
+5. **Graceful degradation** — Diarization optional, continues on partial failure
+6. **Pre-loaded model** — Selected engine (WhisperKit or Parakeet) loaded at app launch, prevents delay on first recording
+7. **Manual-only recording** — Every recording is user-initiated (menu bar `Record`, or `/v1/record`); meeting auto-detection was removed to drop its false-trigger and consent-prompt failure modes
 8. **FluidAudio on-device diarization** — Replaces Python pyannote subprocess, no external dependencies
 9. **Dual-track diarization** — App and mic tracks diarized separately, avoiding echo/cross-talk interference
 10. **Embedded debug RPC + automation API** — In-process HTTP server (`DebugRPCServer`) exposes state, resource metrics (`GET /metrics`), screenshot, and scene actions for shell-driven inspection and integration tests, plus a versioned `/v1` automation API (headless transcribe + job/naming control; reference in `docs/automation-api.md`). Off by default, opt-in via the `Settings → Advanced → Local Automation API` toggle or the `MEETINGTRANSCRIBER_DEBUG_RPC=1` env var, excluded from App Store builds via `#if !APPSTORE`. Action endpoints route through existing `Notification.Name` observers in `MeetingTranscriberApp`, so RPC-driven flows mirror real menu-bar paths.

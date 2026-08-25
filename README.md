@@ -1,6 +1,6 @@
 # Meeting Transcriber
 
-> **The local-first meeting transcriber for macOS.** Records Teams, Zoom, and Webex calls, transcribes them on-device with Whisper / Parakeet, separates speakers, and turns the result into a Markdown protocol using your own Claude CLI or any local LLM. **No cloud. No subscription. No audio ever leaves your Mac.**
+> **The local-first meeting transcriber for macOS.** Records any meeting — Teams, Zoom, Webex, an in-person call around a table, anything your Mac plays — at the press of one button, transcribes it on-device with Whisper / Parakeet, separates speakers, and turns the result into a Markdown protocol using your own Claude CLI or any local LLM. **No cloud. No subscription. No audio ever leaves your Mac.**
 
 <p align="center">
   <img src="docs/hero.gif" alt="Meeting Transcriber turning a Teams call into a Markdown protocol on-device" width="860">
@@ -39,7 +39,7 @@ brew install --cask meeting-transcriber
 
 > Homebrew 6.0+ may flag the third-party tap as untrusted. If so, run `brew trust --tap pasrom/meeting-transcriber` before installing.
 
-The app lives in your menu bar — open it, grant microphone + screen-recording permission, and the first detected Teams/Zoom/Webex call records automatically.
+The app lives in your menu bar — open it, grant microphone permission, and press **Record**.
 
 ---
 
@@ -47,7 +47,7 @@ The app lives in your menu bar — open it, grant microphone + screen-recording 
 
 ```mermaid
 flowchart TD
-    A["Meeting Detected<br/>Teams · Zoom · Webex"]
+    A["Record Button<br/>⌘R — system audio + mic"]
     A2["File Import<br/>WAV · MP3 · M4A · MP4 · FLAC · AMR · 3GP · OPUS · OGG<br/>MKV · WebM (ffmpeg)"]
     B["Dual Recording<br/>App audio + Mic · 16 kHz per track"]
     C["16 kHz Mono Convert<br/>AVAudioFile → AVAsset → ffmpeg"]
@@ -81,7 +81,7 @@ flowchart TD
 
 ## Features
 
-- **Automatic meeting detection** — Recognizes Teams, Zoom, and Webex meetings via window title polling, opt-in browser meeting detection (Google Meet, Whereby, web Zoom/Teams in any Chromium browser) gated behind a recording-consent prompt, and opt-in mic-input detection for call apps without a reliable meeting signal (WeChat, Tencent Meeting, FaceTime, WhatsApp) — per app, off by default, and unlike the browser path it starts recording without a prompt
+- **One-button recording** — Press **Record** (⌘R) in the menu bar to capture everything the Mac plays plus the microphone. No detection, no app picker, no consent prompts — every recording is started deliberately
 - **Dual audio recording** — App audio ([CATapDescription](https://developer.apple.com/documentation/coreaudio/catap)) + microphone simultaneously
 - **On-device transcription** — Two engines, selectable in Settings:
   - [WhisperKit](https://github.com/argmaxinc/WhisperKit) — 99+ languages, ~1 GB model
@@ -92,13 +92,12 @@ flowchart TD
 - **VAD preprocessing** — Optional silence trimming via FluidAudio Silero v6 before transcription, with automatic timestamp remapping
 - **AI protocol generation** — Structured Markdown via [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code), OpenAI-compatible APIs (Ollama, LM Studio, etc.), or disabled (save transcript only)
 - **Configurable protocol prompt** — Custom prompt file support (`~/Library/Application Support/MeetingTranscriber/protocol_prompt.md`) with `{LANGUAGE}`, `{MEETING_DATE}` (`YYYY-MM-DD`), and `{MEETING_TIME}` (`HH:mm`) variables; recordings include authoritative metadata, while imports and recovery jobs resolve time placeholders to `Unknown`
-- **Manual recording** — Record any app via app picker, not just detected meetings
 - **Multi-format input** — Supports WAV, MP3, M4A, MP4, FLAC, plus the phone and messenger voice formats AMR, 3GP/3G2 and OPUS/OGG; MKV and WebM additionally need ffmpeg
 - **Update checker** — Notifies when a new version is available
 - **Background processing** — PipelineQueue runs transcription and protocol generation independently from recording
 - **Record-only mode** — Skip the entire post-recording pipeline and drop dual-source recordings + a metadata sidecar into the output folder, for external/fleet processing (e.g. a separate GPU host)
 - **Local automation API** (Homebrew build): drive the pipeline headlessly over localhost HTTP. POST an audio file, get a diarized transcript back. See [`docs/automation-api.md`](docs/automation-api.md)
-- **Stream Deck and hotkey control** (Homebrew build): start/stop watching from a Stream Deck key, Shortcut, Raycast or any launcher. See [`docs/stream-deck.md`](docs/stream-deck.md)
+- **Stream Deck and hotkey control** (Homebrew build): start/stop a recording from a Stream Deck key, Shortcut, Raycast or any launcher. See [`docs/automation-api.md`](docs/automation-api.md)
 - **Distribution** — Install via Homebrew Cask or build from source
 
 ---
@@ -167,9 +166,8 @@ cd meeting-transcriber
 
 | Permission | Required for | Notes |
 |------------|-------------|-------|
-| Screen Recording | Optional — sharpens the meeting *title* and acts as a fallback for the audio tap. Detection itself works without it | System Settings → Privacy & Security |
+| Screen Recording | Fallback for the app-audio tap when the "Audio Recording" grant is absent. With neither, the tap runs with no error but records silence | System Settings → Privacy & Security |
 | Microphone | Mic recording | Prompted on first use |
-| Accessibility | Mute detection, participant reading (Teams) | System Settings → Privacy & Security |
 | App audio capture | — | No permission needed (purple dot indicator only) |
 
 ---
@@ -197,8 +195,7 @@ The app uses an animated waveform icon in the menu bar that reflects the current
 A red exclamation mark in the bottom-right corner is overlaid on top of the current icon (idle, recording, transcribing, …) whenever one of the required permissions is missing or broken. It means at least one of the following is not in a working state:
 
 - **Microphone** — denied, or granted but the capture engine can't open the device
-- **Screen Recording** — denied, or granted but `CGWindowListCopyWindowInfo` returns no window titles (TCC state out of sync)
-- **Accessibility** — denied, or granted but the AX API refuses to read Teams participant/mute info
+- **Screen Recording** — denied (only relevant when it is the tap's fallback: an app or system recording with no "Audio Recording" grant)
 
 The health check distinguishes *denied* from *broken*. "Broken" usually means the permission is toggled on in System Settings but macOS hasn't actually wired it through — the fix is to toggle the permission off and on again for Meeting Transcriber under **System Settings → Privacy & Security**. Open the menu bar dropdown to see which specific permission is affected; a notification is also posted when the state changes.
 
@@ -208,7 +205,7 @@ The health check distinguishes *denied* from *broken*. "Broken" usually means th
 <img src="docs/menu-bar-record-only.gif" width="80" alt="Record-only mode">
 </p>
 
-A small red dot in the bottom-right corner is overlaid on top of the current icon (idle, recording, transcribing, …) whenever **Record-only mode** is enabled (Settings → General → "Record-only mode"). In this mode the app keeps detecting meetings and producing dual-source recordings, but skips the entire post-recording pipeline (VAD, transcription, diarization, protocol generation). Recordings + a per-meeting `<timestamp>_meta.json` sidecar are dropped into your configured Output Folder for an external pipeline (e.g. a Linux GPU host via Syncthing) to pick up. The dot stays visible across all states so the mode is always clearly indicated; if a permission problem coexists, the red exclamation badge takes precedence.
+A small red dot in the bottom-right corner is overlaid on top of the current icon (idle, recording, transcribing, …) whenever **Record-only mode** is enabled (Settings → General → "Record-only mode"). In this mode every recording still produces dual-source WAVs, but skips the entire post-recording pipeline (VAD, transcription, diarization, protocol generation). Recordings + a per-recording `<timestamp>_meta.json` sidecar are dropped into your configured Output Folder for an external pipeline (e.g. a Linux GPU host via Syncthing) to pick up. The dot stays visible across all states so the mode is always clearly indicated; if a permission problem coexists, the red exclamation badge takes precedence.
 
 ### Per-channel asymmetric-silence indicator
 
@@ -231,7 +228,7 @@ If a permission problem coexists, the red exclamation badge takes precedence ove
 
 ## Usage
 
-Launch the app — it sits in your menu bar. When a supported meeting is detected, recording starts automatically. When the meeting ends, the pipeline runs in the background: transcription → diarization → protocol generation.
+Launch the app — it sits in your menu bar. Press **Record** (⌘R) to capture all system audio plus the microphone. Press **Stop Recording** when the meeting ends, and the pipeline runs in the background: transcription → diarization → protocol generation.
 
 You can also batch-process existing audio and video files via the menu (⌘P) — supported formats: WAV, MP3, M4A, MP4, FLAC, AMR, 3GP/3G2 and OPUS/OGG (and MKV, WebM when ffmpeg is installed). Smartphone call recordings (AMR, 3GP) and voice messages (OPUS) need no extra tools.
 
@@ -245,7 +242,7 @@ Open Settings via the menu bar item or ⌘,.
 
 | Tab | What's in it |
 |---|---|
-| **General** | Record-only mode, apps to watch (Teams/Zoom/Webex/Browser/WeChat/Tencent Meeting/FaceTime/WhatsApp), detection timing, update checks |
+| **General** | Record-only mode, update checks |
 | **Audio** | Microphone device, voice activity detection (VAD), per-channel silence indicator |
 | **Transcribe** | ASR engine (WhisperKit / Parakeet) and per-engine options (model, language, custom vocabulary), live caption overlay (PoC) |
 | **Speakers** | Diarization, mic speaker name, known voices, recognition stats |
@@ -272,7 +269,7 @@ Files are saved to `~/Library/Application Support/MeetingTranscriber/protocols/`
 | Problem | Solution |
 |---------|----------|
 | `claude not found` | Install Claude Code CLI, run `claude --version` — or switch to OpenAI-compatible provider in Settings |
-| No meeting detected | Check the app is enabled under Settings → General → Apps to Watch. Screen Recording is not required for detection; it only sharpens the meeting title |
+| Record button does nothing | Check Microphone permission; an app or system recording additionally needs the Screen Recording grant if "Audio Recording" access wasn't granted |
 | No app audio | Requires macOS 14.2+ for CATapDescription audio capture |
 | Empty transcription | Check that the file contains an audio track — the app converts to 16 kHz mono automatically |
 | Models not loading | Models download on first run (WhisperKit ~1 GB, Parakeet ~50 MB); check internet connectivity |
@@ -307,7 +304,7 @@ The toggle persists in `UserDefaults` and takes effect on the next recording wit
 [![App Store Smoke](https://github.com/pasrom/meeting-transcriber/actions/workflows/appstore.yml/badge.svg)](https://github.com/pasrom/meeting-transcriber/actions/workflows/appstore.yml)
 [![codecov](https://codecov.io/gh/pasrom/meeting-transcriber/branch/main/graph/badge.svg)](https://codecov.io/gh/pasrom/meeting-transcriber)
 
-Pull requests run unit tests, lint, and analyzer in [`ci.yml`](.github/workflows/ci.yml). Two complementary E2E layers run on a self-hosted Apple Silicon Mac mini against the real production models (no mocks): [`e2e.yml`](.github/workflows/e2e.yml) feeds fixture audio through each ASR engine + the WatchLoop pipeline, and [`e2e-app.yml`](.github/workflows/e2e-app.yml) builds and signs the actual `.app`, drives a simulated meeting via [`tools/meeting-simulator`](tools/meeting-simulator), and asserts on the resulting transcript over the embedded debug RPC server.
+Pull requests run unit tests, lint, and analyzer in [`ci.yml`](.github/workflows/ci.yml). Two complementary E2E layers run on a self-hosted Apple Silicon Mac mini against the real production models (no mocks): [`e2e.yml`](.github/workflows/e2e.yml) feeds fixture audio through each ASR engine + the WatchLoop pipeline, and [`e2e-app.yml`](.github/workflows/e2e-app.yml) builds and signs the actual `.app`, starts a recording of [`tools/meeting-simulator`](tools/meeting-simulator)'s audio via `POST /v1/record`, and asserts on the resulting transcript over the embedded debug RPC server.
 
 ---
 
