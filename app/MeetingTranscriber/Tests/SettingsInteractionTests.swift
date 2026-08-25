@@ -70,35 +70,6 @@ final class SettingsInteractionTests: XCTestCase {
         XCTAssertEqual(settings.protocolProvider, .openAICompatible)
     }
 
-    // MARK: - Stepper write-back
-
-    func testPollIntervalStepperIncrementsSetting() throws {
-        let settings = makeSettings()
-        settings.pollInterval = 5.0
-        let view = GeneralSettingsView(settings: settings, updateChecker: nil)
-
-        // Poll-interval + grace each have a Stepper; poll-interval is first in
-        // document order (both have empty, hidden labels so can't be found by text).
-        let steppers = try view.inspect().findAll(ViewType.Stepper.self)
-        XCTAssertGreaterThanOrEqual(steppers.count, 2, "expected poll-interval + grace steppers")
-        try steppers[0].increment()
-
-        XCTAssertEqual(settings.pollInterval, 5.5, accuracy: 0.0001, "stepping (step 0.5) must write back to pollInterval")
-    }
-
-    func testGracePeriodStepperIncrementsSetting() throws {
-        let settings = makeSettings()
-        settings.endGrace = 5.0
-        let view = GeneralSettingsView(settings: settings, updateChecker: nil)
-
-        // Grace is the second stepper in document order (step 1).
-        let steppers = try view.inspect().findAll(ViewType.Stepper.self)
-        XCTAssertGreaterThanOrEqual(steppers.count, 2, "expected poll-interval + grace steppers")
-        try steppers[1].increment()
-
-        XCTAssertEqual(settings.endGrace, 6.0, accuracy: 0.0001, "stepping (step 1) must write back to endGrace")
-    }
-
     // MARK: - LiveCaptionsOverlay render
 
     func testLiveCaptionsOverlayBackendIdentifierTracksActiveBackend() throws {

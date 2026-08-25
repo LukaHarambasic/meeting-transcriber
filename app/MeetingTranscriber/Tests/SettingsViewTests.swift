@@ -100,42 +100,6 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
 
     // MARK: - General tab
 
-    func testAppsToWatchSection() throws {
-        let body = try makeGeneral().inspect()
-        XCTAssertNoThrow(try body.find(text: "Microsoft Teams"))
-        XCTAssertNoThrow(try body.find(text: "Zoom"))
-        XCTAssertNoThrow(try body.find(text: "Webex"))
-    }
-
-    func testAppsToWatchTogglesBindToSettings() throws {
-        // Each toggle flips its OWN setting (the UI end of the watchApps wiring).
-        let settings = makeSettings()
-        let view = makeGeneral(settings: settings)
-        let cases: [(label: String, get: () -> Bool)] = [
-            ("Microsoft Teams", { settings.watchTeams }),
-            ("Zoom", { settings.watchZoom }),
-            ("Webex", { settings.watchWebex }),
-        ]
-        for (label, get) in cases {
-            XCTAssertTrue(get(), "precondition: \(label) defaults on")
-            let toggle = try view.inspect().find(ViewType.Toggle.self) { toggle in
-                try toggle.labelView().text().string() == label
-            }
-            try toggle.tap()
-            XCTAssertFalse(get(), "tapping the \(label) toggle must turn its own setting off")
-        }
-    }
-
-    func testPollIntervalFieldExists() throws {
-        let body = try makeGeneral().inspect()
-        XCTAssertNoThrow(try body.find(text: "Poll Interval"))
-    }
-
-    func testGracePeriodFieldExists() throws {
-        let body = try makeGeneral().inspect()
-        XCTAssertNoThrow(try body.find(text: "Grace Period"))
-    }
-
     func testUpdatesSectionShownWhenCheckerProvided() throws {
         let checker = UpdateChecker(provider: MockUpdateProvider())
         let body = try makeGeneral(updateChecker: checker).inspect()
@@ -499,7 +463,6 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
         let body = try makeAdvanced().inspect()
         XCTAssertNoThrow(try body.find(text: "Screen Recording"))
         XCTAssertNoThrow(try body.find(text: "Microphone"))
-        XCTAssertNoThrow(try body.find(text: "Accessibility"))
     }
 
     #if !APPSTORE

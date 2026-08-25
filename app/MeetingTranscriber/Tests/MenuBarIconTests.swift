@@ -2,7 +2,7 @@
 import XCTest
 
 @MainActor
-final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_length
+final class MenuBarIconTests: XCTestCase {
     func testImageWithNoBadgeIsTemplate() {
         let image = MenuBarIcon.image(badge: .inactive)
         XCTAssertTrue(image.isTemplate)
@@ -208,24 +208,22 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
 
     // MARK: - BadgeKind.compute()
 
-    // 1. Recording while watchLoop recording
-    func testCompute_watchLoopRecording_returnsRecording() {
+    // 1. Recording while recordingActive
+    func testCompute_recordingActive_returnsRecording() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .recording,
-            transcriberState: .idle,
+            recordingActive: true,
+            transcriberState: .recording,
             activeJobState: nil,
             updateAvailable: false,
         )
         XCTAssertEqual(result, .recording)
     }
 
-    // 2. Recording takes priority over transcriberState
-    func testCompute_watchLoopRecording_priorityOverTranscriberState() {
+    // 2. Recording takes priority over transcriberState.transcribing
+    func testCompute_recordingActive_priorityOverTranscriberState() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .recording,
-            transcriberState: .transcribing,
+            recordingActive: true,
+            transcriberState: .recording,
             activeJobState: nil,
             updateAvailable: false,
         )
@@ -235,8 +233,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 3. UserAction for waitingForSpeakerCount
     func testCompute_waitingForSpeakerCount_returnsUserAction() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .waitingForSpeakerCount,
             activeJobState: nil,
             updateAvailable: false,
@@ -247,8 +244,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 4. UserAction for waitingForSpeakerNames
     func testCompute_waitingForSpeakerNames_returnsUserAction() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .waitingForSpeakerNames,
             activeJobState: nil,
             updateAvailable: false,
@@ -259,8 +255,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 5. Done for protocolReady
     func testCompute_protocolReady_returnsDone() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .protocolReady,
             activeJobState: nil,
             updateAvailable: false,
@@ -271,8 +266,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 6. Error for transcriberError
     func testCompute_transcriberError_returnsError() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .error,
             activeJobState: nil,
             updateAvailable: false,
@@ -283,8 +277,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 7. Transcribing for transcriberTranscribing
     func testCompute_transcriberTranscribing_returnsTranscribing() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .transcribing,
             activeJobState: nil,
             updateAvailable: false,
@@ -295,8 +288,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 8. Transcribing for recordingDone
     func testCompute_recordingDone_returnsTranscribing() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .recordingDone,
             activeJobState: nil,
             updateAvailable: false,
@@ -307,8 +299,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 9. Processing for generatingProtocol
     func testCompute_generatingProtocol_returnsProcessing() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .generatingProtocol,
             activeJobState: nil,
             updateAvailable: false,
@@ -316,11 +307,10 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
         XCTAssertEqual(result, .processing)
     }
 
-    // 10. ActiveJob transcribing (watchLoop inactive)
+    // 10. ActiveJob transcribing (not recording)
     func testCompute_activeJobTranscribing_returnsTranscribing() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .transcribing,
             updateAvailable: false,
@@ -331,8 +321,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 11. ActiveJob diarizing
     func testCompute_activeJobDiarizing_returnsDiarizing() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .diarizing,
             updateAvailable: false,
@@ -343,8 +332,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 12. ActiveJob generatingProtocol → processing
     func testCompute_activeJobGeneratingProtocol_returnsProcessing() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .generatingProtocol,
             updateAvailable: false,
@@ -355,8 +343,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 13. ActiveJob waiting → processing
     func testCompute_activeJobWaiting_returnsProcessing() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .waiting,
             updateAvailable: false,
@@ -367,8 +354,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 14. ActiveJob done → processing
     func testCompute_activeJobDone_returnsProcessing() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .done,
             updateAvailable: false,
@@ -379,8 +365,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 15. ActiveJob error → processing
     func testCompute_activeJobError_returnsProcessing() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .error,
             updateAvailable: false,
@@ -391,8 +376,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 16. UpdateAvailable when all idle
     func testCompute_updateAvailable_returnsUpdateAvailable() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
             updateAvailable: true,
@@ -403,8 +387,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 17. Inactive when all idle
     func testCompute_allIdle_returnsInactive() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
             updateAvailable: false,
@@ -412,11 +395,10 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
         XCTAssertEqual(result, .inactive)
     }
 
-    // 18. WatchLoop active but idle transcriberState → inactive
-    func testCompute_watchLoopActiveIdleTranscriber_returnsInactive() {
+    // 18. recordingActive true but transcriberState idle → inactive (desynced state)
+    func testCompute_recordingActiveIdleTranscriber_returnsInactive() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .idle,
             activeJobState: nil,
             updateAvailable: false,
@@ -427,8 +409,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
     // 19. ActiveJob takes priority over updateAvailable
     func testCompute_activeJob_priorityOverUpdateAvailable() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .transcribing,
             updateAvailable: true,
@@ -436,34 +417,20 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
         XCTAssertEqual(result, .transcribing)
     }
 
-    // 20. WatchLoop recording takes priority over activeJob and updateAvailable
-    func testCompute_watchLoopRecording_priorityOverActiveJobAndUpdate() {
+    // 19. Recording takes priority over activeJob and updateAvailable
+    func testCompute_recordingActive_priorityOverActiveJobAndUpdate() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .recording,
-            transcriberState: .idle,
+            recordingActive: true,
+            transcriberState: .recording,
             activeJobState: .transcribing,
             updateAvailable: true,
         )
         XCTAssertEqual(result, .recording)
     }
 
-    // 21. WatchLoop active with .watching transcriberState → falls through to inactive
-    func testCompute_watchLoopActiveWatchingState_fallsThroughToInactive() {
-        let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
-            transcriberState: .watching,
-            activeJobState: nil,
-            updateAvailable: false,
-        )
-        XCTAssertEqual(result, .inactive)
-    }
-
     func testCompute_permissionBroken_returnsError() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
             updateAvailable: false,
@@ -474,9 +441,8 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
 
     func testCompute_recordingOverridesPermissionProblem() {
         let result = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .recording,
-            transcriberState: .idle,
+            recordingActive: true,
+            transcriberState: .recording,
             activeJobState: nil,
             updateAvailable: false,
             permissionProblem: true,
@@ -486,8 +452,7 @@ final class MenuBarIconTests: XCTestCase { // swiftlint:disable:this type_body_l
 
     func testCompute_permissionProblemOverridesUpdate() {
         let result = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
             updateAvailable: true,

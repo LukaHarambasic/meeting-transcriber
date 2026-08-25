@@ -35,7 +35,6 @@
             // unlabeled trailing closure to the FIRST function-type param, and
             // the enqueueFile tests rely on that being enqueueFile.
             enqueueFile: @escaping (URL) -> Bool = { _ in false },
-            confirmBrowserConsent: @escaping (Bool) -> Bool = { _ in false },
             enqueueFiles: @escaping ([URL]) -> Int = { _ in 0 },
             enqueueReturningIDs: @escaping ([URL]) -> [UUID] = { _ in [] },
             jobStatus: @escaping (UUID) -> JobStatusDTO? = { _ in nil },
@@ -43,8 +42,6 @@
             confirmNaming: @escaping (UUID, [String: String]) -> Bool = { _, _ in false },
             skipJobNaming: @escaping (UUID) -> Bool = { _ in false },
             transcribe: @escaping (URL, Double) async -> BlockingTranscribeResult = { _, _ in .noFile },
-            watchStatus: @escaping () -> WatchStatusDTO = { .notWatching },
-            watchControl: @escaping (WatchAction) async -> WatchControlOutcome = { _ in .failed },
             recordStatus: @escaping () -> RecordStatusDTO = { .notRecording },
             recordControl: @escaping (RecordActionPayload) async -> RecordControlOutcome = { _ in .failed },
         ) async throws -> URL {
@@ -52,7 +49,6 @@
                 port: 0,
                 token: Self.testToken,
                 snapshot: { snapshot },
-                confirmBrowserConsent: confirmBrowserConsent,
                 enqueueFile: enqueueFile,
                 enqueueFiles: enqueueFiles,
                 enqueueReturningIDs: enqueueReturningIDs,
@@ -61,8 +57,6 @@
                 confirmNaming: confirmNaming,
                 skipJobNaming: skipJobNaming,
                 transcribe: transcribe,
-                watchStatus: watchStatus,
-                watchControl: watchControl,
                 recordStatus: recordStatus,
                 recordControl: recordControl,
             )
@@ -252,58 +246,6 @@
                 for: request("GET", base.appendingPathComponent("screenshot"), headers: authHeader),
             )
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 503)
-        }
-
-        // MARK: - /action/confirmBrowserConsent (issue #503)
-
-        func testConfirmBrowserConsentUndecodableBodyReturns400() async throws {
-            let base = try await startServer()
-            var req = request("POST", base.appendingPathComponent("action/confirmBrowserConsent"), headers: authHeader)
-            req.httpBody = Data("{}".utf8) // missing "granted"
-            let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 400)
-        }
-
-        func testConfirmBrowserConsentNoParkedPromptReturnsResolvedFalse() async throws {
-            // Closure returns false (nothing parked) → 200 {"resolved":false} so
-            // the driver keeps polling until a prompt actually parks.
-            let noPrompt: (Bool) -> Bool = { _ in false }
-            let base = try await startServer(confirmBrowserConsent: noPrompt)
-            var req = request("POST", base.appendingPathComponent("action/confirmBrowserConsent"), headers: authHeader)
-            req.httpBody = Data(#"{"granted":true}"#.utf8)
-            let (data, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-            XCTAssertEqual(String(data: data, encoding: .utf8), #"{"resolved":false}"#)
-        }
-
-        func testConfirmBrowserConsentResolvesAndForwardsGranted() async throws {
-            // Records each granted value the closure sees, as an array so the box
-            // holds a non-optional Bool and "not yet called" is just empty.
-            actor GrantBox {
-                private(set) var grants: [Bool] = []
-                func record(_ granted: Bool) {
-                    grants.append(granted)
-                }
-            }
-            let box = GrantBox()
-            let confirm: (Bool) -> Bool = { granted in
-                Task { await box.record(granted) }
-                return true
-            }
-            let base = try await startServer(confirmBrowserConsent: confirm)
-            var req = request("POST", base.appendingPathComponent("action/confirmBrowserConsent"), headers: authHeader)
-            req.httpBody = Data(#"{"granted":true}"#.utf8)
-            let (data, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-            XCTAssertEqual(String(data: data, encoding: .utf8), #"{"resolved":true}"#)
-
-            var grants: [Bool] = []
-            for _ in 0 ..< 20 {
-                grants = await box.grants
-                if !grants.isEmpty { break }
-                try await Task.sleep(for: .milliseconds(25))
-            }
-            XCTAssertEqual(grants, [true], "the posted granted value must reach the closure")
         }
 
         // MARK: - /action/enqueueFile
@@ -1097,111 +1039,6 @@
             )
         }
 
-        // MARK: - /v1/watch
-
-        func testV1WatchGETReturnsStatus() async throws {
-            let dto = WatchStatusDTO(
-                watching: true, state: "recording", badge: "recording",
-                manualRecording: false, pendingConsentApp: nil, permissionsHealthy: true,
-            )
-            // Typed local, not a trailing closure: with only one argument
-            // SwiftLint suggests trailing syntax, which would bind to
-            // `enqueueFile` (the first function-type parameter) instead.
-            let status: () -> WatchStatusDTO = { dto }
-            let base = try await startServer(watchStatus: status)
-
-            let (data, response) = try await URLSession.shared.data(
-                for: request("GET", base.appendingPathComponent("v1/watch"), headers: authHeader),
-            )
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-            let decoded = try JSONDecoder().decode(WatchStatusDTO.self, from: data)
-            XCTAssertTrue(decoded.watching)
-            XCTAssertEqual(decoded.state, "recording")
-            XCTAssertEqual(decoded.badge, "recording")
-            XCTAssertTrue(decoded.permissionsHealthy)
-        }
-
-        /// The POST body must carry the state *after* the action, so a controller
-        /// can redraw from the response instead of racing a follow-up GET.
-        func testV1WatchPOSTStartReturnsResultingState() async throws {
-            var isWatching = false
-            let base = try await startServer(
-                watchStatus: {
-                    WatchStatusDTO(
-                        watching: isWatching, state: isWatching ? "watching" : nil, badge: "inactive",
-                        manualRecording: false, pendingConsentApp: nil, permissionsHealthy: true,
-                    )
-                },
-                watchControl: { action in
-                    guard action == .start else { return .unchanged }
-                    isWatching = true
-                    return .changed
-                },
-            )
-
-            var req = request("POST", base.appendingPathComponent("v1/watch"), headers: authHeader)
-            req.httpBody = Data(#"{"action":"start"}"#.utf8)
-            let (data, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-            let decoded = try JSONDecoder().decode(WatchStatusDTO.self, from: data)
-            XCTAssertTrue(decoded.watching, "the response must reflect the post-action state, not the pre-action one")
-        }
-
-        /// `.unchanged` is a success: a key press asks for an outcome, and already
-        /// being in that outcome is not an error.
-        func testV1WatchPOSTUnchangedReturns200() async throws {
-            // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
-            // Declared sync (it never suspends); Swift coerces it to the async parameter.
-            let control: (WatchAction) -> WatchControlOutcome = { _ in .unchanged }
-            let base = try await startServer(watchControl: control)
-            var req = request("POST", base.appendingPathComponent("v1/watch"), headers: authHeader)
-            req.httpBody = Data(#"{"action":"stop"}"#.utf8)
-            let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-        }
-
-        /// A manual recording owning the loop must surface as 409, not a silent
-        /// 200 — `toggleWatching` refuses silently, and that refusal is invisible
-        /// to a remote caller unless the status code carries it.
-        func testV1WatchPOSTBlockedReturns409() async throws {
-            let dto = WatchStatusDTO(
-                watching: false, state: "recording", badge: "recording",
-                manualRecording: true, pendingConsentApp: nil, permissionsHealthy: true,
-            )
-            let base = try await startServer(watchStatus: { dto }, watchControl: { _ in .blocked })
-
-            var req = request("POST", base.appendingPathComponent("v1/watch"), headers: authHeader)
-            req.httpBody = Data(#"{"action":"toggle"}"#.utf8)
-            let (data, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 409)
-            // The body is the same shape on every status, so a client parses once
-            // and can show *why* it was refused.
-            let decoded = try JSONDecoder().decode(WatchStatusDTO.self, from: data)
-            XCTAssertTrue(decoded.manualRecording)
-        }
-
-        func testV1WatchPOSTFailedReturns503() async throws {
-            // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
-            let control: (WatchAction) -> WatchControlOutcome = { _ in .failed }
-            let base = try await startServer(watchControl: control)
-            var req = request("POST", base.appendingPathComponent("v1/watch"), headers: authHeader)
-            req.httpBody = Data(#"{"action":"start"}"#.utf8)
-            let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 503)
-        }
-
-        func testV1WatchPOSTUnknownActionReturns400() async throws {
-            // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
-            let control: (WatchAction) -> WatchControlOutcome = { _ in .changed }
-            let base = try await startServer(watchControl: control)
-            var req = request("POST", base.appendingPathComponent("v1/watch"), headers: authHeader)
-            req.httpBody = Data(#"{"action":"pause"}"#.utf8)
-            let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 400)
-        }
-
         // MARK: - /v1/record
 
         func testV1RecordGETReturnsStatus() async throws {
@@ -1209,7 +1046,8 @@
                 recording: true, startPending: false, state: "recording", badge: "recording",
                 otherRecordingActive: false, noMic: false, microphoneHealthy: true, screenRecordingHealthy: true,
             )
-            // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
+            // Typed local, not a trailing closure: a bare trailing closure would bind
+            // to the wrong function-type parameter.
             let status: () -> RecordStatusDTO = { dto }
             let base = try await startServer(recordStatus: status)
 
@@ -1224,9 +1062,8 @@
             XCTAssertTrue(decoded.microphoneHealthy)
         }
 
-        /// Same contract as `/v1/watch`: the body carries the state *after* the
-        /// action, so a controller redraws from the response instead of racing a
-        /// follow-up GET.
+        /// The body carries the state *after* the action, so a controller redraws
+        /// from the response instead of racing a follow-up GET.
         func testV1RecordPOSTStartReturnsResultingState() async throws {
             var isRecording = false
             let base = try await startServer(
@@ -1254,7 +1091,8 @@
         }
 
         func testV1RecordPOSTUnchangedReturns200() async throws {
-            // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
+            // Typed local, not a trailing closure: a bare trailing closure would bind
+            // to the wrong function-type parameter.
             let control: (RecordActionPayload) -> RecordControlOutcome = { _ in .unchanged }
             let base = try await startServer(recordControl: control)
             var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
@@ -1279,10 +1117,10 @@
             XCTAssertTrue(decoded.otherRecordingActive, "the body has to say what is holding the loop")
         }
 
-        /// The code that distinguishes this resource from `/v1/watch`, where the
-        /// same machine state answers 200 because app audio still records. Here
-        /// nothing would, and no amount of retrying changes that — so it must be
-        /// neither a 200 nor a 503, and the body has to say which switch is off.
+        /// "No Microphone" makes a plain microphone start unsatisfiable — nothing
+        /// would be captured, and no amount of retrying changes that — so it must
+        /// be neither a 200 nor a transient 503, and the body has to say which
+        /// switch is off.
         func testV1RecordPOSTRefusedReturns412() async throws {
             let dto = RecordStatusDTO(
                 recording: false, startPending: false, state: nil, badge: "inactive",
@@ -1301,7 +1139,8 @@
         }
 
         func testV1RecordPOSTFailedReturns503() async throws {
-            // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
+            // Typed local, not a trailing closure: a bare trailing closure would bind
+            // to the wrong function-type parameter.
             let control: (RecordActionPayload) -> RecordControlOutcome = { _ in .failed }
             let base = try await startServer(recordControl: control)
             var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
@@ -1311,7 +1150,8 @@
         }
 
         func testV1RecordPOSTUnknownActionReturns400() async throws {
-            // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
+            // Typed local, not a trailing closure: a bare trailing closure would bind
+            // to the wrong function-type parameter.
             let control: (RecordActionPayload) -> RecordControlOutcome = { _ in .changed }
             let base = try await startServer(recordControl: control)
             var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
@@ -1401,14 +1241,6 @@
             let base = try await startServer()
             let (_, response) = try await URLSession.shared.data(
                 for: request("GET", base.appendingPathComponent("v1/record")),
-            )
-            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 401)
-        }
-
-        func testV1WatchRequiresAuth() async throws {
-            let base = try await startServer()
-            let (_, response) = try await URLSession.shared.data(
-                for: request("GET", base.appendingPathComponent("v1/watch")),
             )
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 401)
         }

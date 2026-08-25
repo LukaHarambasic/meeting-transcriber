@@ -192,17 +192,22 @@ extension XCTestCase {
 
 // MARK: - WatchLoop / AppState Helpers
 
-/// Returns a MeetingDetector with no patterns — never matches any window.
-func makeSilentDetector() -> MeetingDetector {
-    MeetingDetector(patterns: [])
+extension HealthCheckResult {
+    /// Every permission granted and working. The seed for tests that assert a
+    /// recording starts, so nothing they measure depends on the runner's TCC
+    /// state — `makeTestWatchLoop` installs the same verdict for the same
+    /// reason. Re-homed here from the deleted `FixedMeetingDetector.swift`
+    /// (auto-watch removal): several surviving suites across the test target
+    /// depend on this shared fixture, and `TestHelpers.swift` is where they
+    /// already look for it.
+    static let allHealthy = Self(screenRecording: .healthy, microphone: .healthy)
 }
 
-/// Creates a WatchLoop backed by a MockRecorder and a silent detector.
+/// Creates a WatchLoop backed by a MockRecorder.
 /// Assign the returned loop to `appState.watching.watchLoop` in tests that need
 /// an active loop without calling toggleWatching() (which requires Permissions).
 @MainActor
 func makeTestWatchLoop(
-    detector: any MeetingDetecting = makeSilentDetector(),
     pipelineQueue: PipelineQueue? = nil,
     recordOnly: @escaping () -> Bool = { false },
     recordOnlyOutputDir: @escaping () -> URL = { AppPaths.recordingsDir },
@@ -212,11 +217,9 @@ func makeTestWatchLoop(
 ) -> (WatchLoop, MockRecorder) {
     let recorder = makeMockRecorder()
     let loop = WatchLoop(
-        detector: detector,
         recorderFactory: { recorder },
         pipelineQueue: pipelineQueue,
         pollInterval: 0.05,
-        endGracePeriod: 0.1,
         noMic: noMic,
         micDeviceUID: micDeviceUID,
         recordOnly: recordOnly,
@@ -269,21 +272,6 @@ final class ManagedCounter {
 }
 
 // MARK: - Shared Mock Classes
-
-/// A `MeetingDetecting` stub that never detects a meeting and reports any given
-/// meeting as inactive — so a `WatchLoop.handleMeeting(...)` ends immediately.
-/// Shared so per-test files don't each redeclare it.
-final class ImmediatelyInactiveDetector: MeetingDetecting {
-    func checkOnce() -> DetectedMeeting? {
-        nil
-    }
-
-    func isMeetingActive(_: DetectedMeeting) -> Bool {
-        false
-    }
-
-    func reset(appName _: String?) {}
-}
 
 extension XCTestCase {
     /// Build a `Date` from local-time components in the Gregorian calendar,

@@ -31,13 +31,12 @@ final class NotificationManagerSchedulingTests: XCTestCase {
 
     // MARK: - setUp
 
-    func testSetUpRegistersDelegateCategoryAndRequestsAuth() {
+    func testSetUpRegistersDelegateAndRequestsAuth() {
         let (manager, fake) = makeManager()
         manager.setUp()
         XCTAssertTrue(manager.isSetUp)
         XCTAssertIdentical(fake.delegate, manager)
         XCTAssertTrue(fake.authRequested)
-        XCTAssertEqual(fake.categories.map(\.identifier), [NotificationManager.consentCategoryID])
     }
 
     func testSetUpSkippedWhenNotDeliverable() {
@@ -46,7 +45,6 @@ final class NotificationManagerSchedulingTests: XCTestCase {
         XCTAssertFalse(manager.isSetUp)
         XCTAssertFalse(fake.authRequested)
         XCTAssertNil(fake.delegate)
-        XCTAssertTrue(fake.categories.isEmpty)
     }
 
     // MARK: - notify
@@ -81,76 +79,6 @@ final class NotificationManagerSchedulingTests: XCTestCase {
         box.value = false
         manager.notify(title: "Meeting Detected", body: "x")
         XCTAssertTrue(fake.added.isEmpty)
-    }
-
-    // MARK: - askToRecord consent flow (issue #503)
-
-    /// Awaits the consent notification the manager posts on park, then returns it.
-    /// `fake.added` is a synchronous lock-guarded read, so the yield-based
-    /// `waitFor` overload drains the parked `askToRecord` Task without sleeping.
-    private func firstPostedRequest(from fake: FakeNotificationScheduler) async -> UNNotificationRequest? {
-        await waitFor(!fake.added.isEmpty)
-        return fake.added.first
-    }
-
-    func testAskToRecordPostsConsentNotificationAndRecordActionGrants() async {
-        let (manager, fake) = makeManager()
-        manager.setUp()
-        let task = Task { await manager.askToRecord(title: "Record browser meeting?", body: "A meeting is active.") }
-
-        guard let posted = await firstPostedRequest(from: fake) else {
-            XCTFail("no consent notification posted")
-            return
-        }
-        XCTAssertEqual(posted.content.categoryIdentifier, NotificationManager.consentCategoryID)
-        XCTAssertEqual(posted.content.title, "Record browser meeting?")
-        XCTAssertEqual(posted.content.body, "A meeting is active.")
-        // The prompt asks a question that expires after `consentPromptTimeout`.
-        // At the default `.active` level macOS renders it as a banner, which any
-        // Focus mode suppresses outright — so the question is never seen, times
-        // out as a decline, and browser meetings silently never record.
-        // `.timeSensitive` is the only level that breaks through Focus
-        // (issue #543).
-        XCTAssertEqual(posted.content.interruptionLevel, .timeSensitive)
-
-        manager.resolveConsent(responseIdentifier: posted.identifier, actionIdentifier: NotificationManager.recordActionID)
-        let answer = await task.value
-        XCTAssertEqual(answer, .granted)
-    }
-
-    func testAskToRecordIgnoreActionDeclines() async {
-        let (manager, fake) = makeManager()
-        manager.setUp()
-        let task = Task { await manager.askToRecord(title: "Record browser meeting?", body: "A meeting is active.") }
-
-        guard let posted = await firstPostedRequest(from: fake) else {
-            XCTFail("no consent notification posted")
-            return
-        }
-        manager.resolveConsent(responseIdentifier: posted.identifier, actionIdentifier: NotificationManager.ignoreActionID)
-        let answer = await task.value
-        XCTAssertEqual(answer, .declined)
-    }
-
-    /// A resolved prompt is withdrawn. macOS clears a notification the user
-    /// actually tapped, but not one that expired on its timer or was answered
-    /// out of band, so without this every unanswered prompt stays in
-    /// Notification Center: 31 dead prompts were sitting on the reported
-    /// machine, each one asking about a meeting that ended long ago.
-    func testResolvedConsentPromptIsWithdrawn() async {
-        let (manager, fake) = makeManager()
-        manager.setUp()
-        let task = Task { await manager.askToRecord(title: "Record browser meeting?", body: "A meeting is active.") }
-
-        guard let posted = await firstPostedRequest(from: fake) else {
-            XCTFail("no consent notification posted")
-            return
-        }
-        XCTAssertTrue(fake.removedIdentifiers.isEmpty, "must not withdraw a prompt that is still parked")
-
-        manager.resolveConsent(responseIdentifier: posted.identifier, actionIdentifier: NotificationManager.ignoreActionID)
-        _ = await task.value
-        XCTAssertEqual(fake.removedIdentifiers, [posted.identifier])
     }
 
     // MARK: - urgency

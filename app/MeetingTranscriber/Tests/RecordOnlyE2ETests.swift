@@ -2,14 +2,15 @@ import AVFoundation
 @testable import MeetingTranscriber
 import XCTest
 
-/// End-to-end coverage for the auto-detect (`handleMeeting`) call site of the
-/// record-only branch. The manual-recording call site is already covered by
-/// `WatchLoopTests.test_recordOnly_*`, but those tests use empty `Data()` for
-/// the recorder output. These tests run with a real fixture WAV so a regression
-/// that breaks file move semantics or sidecar JSON shape surfaces against
-/// realistic content. They also exercise the auto-detect entry point (vs the
-/// existing manual-recording entry point) so a refactor that touches one
-/// `enqueueRecording` caller without the other is caught.
+/// End-to-end coverage for the manual-recording call site of the record-only
+/// branch, run with a real fixture WAV so a regression that breaks file move
+/// semantics or sidecar JSON shape surfaces against realistic content (rather
+/// than the empty `Data()` used by `WatchLoopTests.test_recordOnly_*`).
+///
+/// Originally covered the auto-detect (`handleMeeting`) call site as well —
+/// re-anchored on the manual-recording path (the only recording path left)
+/// after auto-watch removal, flipping the sidecar's expected `trigger` from
+/// `.auto` to `.manual` to match.
 @MainActor
 final class RecordOnlyE2ETests: XCTestCase { // swiftlint:disable:this balanced_xctest_lifecycle
     // swiftlint:disable implicitly_unwrapped_optional
@@ -31,11 +32,12 @@ final class RecordOnlyE2ETests: XCTestCase { // swiftlint:disable:this balanced_
 
     // MARK: - Tests
 
-    func test_handleMeeting_recordOnly_writesSidecarAndSkipsPipeline() async throws {
+    func test_manualRecording_recordOnly_writesSidecarAndSkipsPipeline() async throws {
         let outputDir = tmpDir.appendingPathComponent("output", isDirectory: true)
         let loop = makeRecordOnlyLoop(outputDir: outputDir)
 
-        try await loop.handleMeeting(makeMeeting())
+        try await loop.startManualRecording(pid: 9999, appName: "Microsoft Teams", title: "Standup")
+        loop.stopManualRecording()
 
         XCTAssertTrue(queue.jobs.isEmpty, "record-only must not enqueue a pipeline job")
         XCTAssertTrue(notifier.calls.isEmpty, "no failure notification on the happy path")
@@ -54,8 +56,8 @@ final class RecordOnlyE2ETests: XCTestCase { // swiftlint:disable:this balanced_
         XCTAssertEqual(sidecar.files.app, "\(Self.basename)_app.wav")
         XCTAssertEqual(sidecar.files.mic, "\(Self.basename)_mic.wav")
         XCTAssertEqual(
-            sidecar.trigger, .auto,
-            "a detector-started meeting must be labelled auto, not manual",
+            sidecar.trigger, .manual,
+            "a recording started from the app picker must be labelled manual, not auto",
         )
         XCTAssertLessThanOrEqual(sidecar.startedAt, sidecar.stoppedAt)
 
@@ -68,13 +70,14 @@ final class RecordOnlyE2ETests: XCTestCase { // swiftlint:disable:this balanced_
         XCTAssertGreaterThan(avFile.length, 100_000)
     }
 
-    func test_handleMeeting_recordOnly_writeFailure_notifiesAndDoesNotEnqueue() async throws {
+    func test_manualRecording_recordOnly_writeFailure_notifiesAndDoesNotEnqueue() async throws {
         // `/dev/null/...` makes `createDirectory(at:)` throw, hitting the
         // error branch in `writeRecordOnlySidecar`.
         let unwritable = URL(fileURLWithPath: "/dev/null/cannot-write")
         let loop = makeRecordOnlyLoop(outputDir: unwritable)
 
-        try await loop.handleMeeting(makeMeeting())
+        try await loop.startManualRecording(pid: 9999, appName: "Microsoft Teams", title: "Standup")
+        loop.stopManualRecording()
 
         XCTAssertTrue(queue.jobs.isEmpty, "still no enqueue when sidecar write fails")
         XCTAssertEqual(notifier.calls.count, 1, "user must be notified about lost record-only output")
@@ -109,16 +112,10 @@ final class RecordOnlyE2ETests: XCTestCase { // swiftlint:disable:this balanced_
     }
 
     private func makeRecordOnlyLoop(outputDir: URL) -> WatchLoop {
-        let detector = PowerAssertionDetector()
-        // Empty assertion list → meeting "ends" on first poll.
-        detector.assertionProvider = { [:] }
-
         let loop = WatchLoop(
-            detector: detector,
             recorderFactory: { self.recorder },
             pipelineQueue: queue,
             pollInterval: 0.05,
-            endGracePeriod: 0.1,
             maxDuration: 10,
             noMic: false,
             recordOnly: { true },
@@ -129,14 +126,5 @@ final class RecordOnlyE2ETests: XCTestCase { // swiftlint:disable:this balanced_
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
         return loop
-    }
-
-    private func makeMeeting(pid: pid_t = 9999) -> DetectedMeeting {
-        DetectedMeeting(
-            pattern: .teams,
-            windowTitle: "Standup | Microsoft Teams",
-            ownerName: "Microsoft Teams",
-            windowPID: pid,
-        )
     }
 }

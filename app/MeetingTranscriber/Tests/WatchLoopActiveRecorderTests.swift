@@ -34,11 +34,14 @@ private final class CapturingRecorder: RecordingProvider {
     }
 }
 
-/// Regression coverage for the bug where `handleMeeting` (auto-watch path)
-/// never assigned `activeRecorder`, leaving `AppState`'s channel-health
-/// polling task reading nil on every tick — the red-tint indicator never
-/// fired during real recordings. Manual recording was already wired
-/// correctly. This test pins the auto-watch path to the same contract.
+/// Regression coverage for the bug where a recording start never assigned
+/// `activeRecorder`, leaving `AppState`'s channel-health polling task reading
+/// nil on every tick — the red-tint indicator never fired during real
+/// recordings. Re-anchored on the manual-recording path (the only recording
+/// path left) after auto-watch/`handleMeeting` was removed; the invariant
+/// pinned is unchanged: both `activeRecordingSource` and `activeRecorder`
+/// must be readable synchronously from inside `onStateChange` at the moment
+/// the phase moves, not merely by the time `start`/`stop` returns.
 @MainActor
 final class WatchLoopActiveRecorderTests: XCTestCase {
     /// `WatchingController` starts channel-health monitoring from
@@ -51,11 +54,9 @@ final class WatchLoopActiveRecorderTests: XCTestCase {
     func testTheRecordingSourceIsReadableFromTheRecordingTransition() async throws {
         let recorder = CapturingRecorder()
         let loop = WatchLoop(
-            detector: ImmediatelyInactiveDetector(),
             recorderFactory: { recorder },
             pipelineQueue: nil,
             pollInterval: 0.01,
-            endGracePeriod: 0.01,
             maxDuration: 10,
             noMic: true,
         )
@@ -69,29 +70,21 @@ final class WatchLoopActiveRecorderTests: XCTestCase {
             sourceAtTransition = loop?.activeRecordingSource
         }
 
-        let meeting = DetectedMeeting(
-            pattern: .teams,
-            windowTitle: "Test Meeting | Microsoft Teams",
-            ownerName: "Microsoft Teams",
-            windowPID: 4242,
-        )
-
-        try await loop.handleMeeting(meeting)
+        try await loop.startManualRecording(pid: 4242, appName: "Microsoft Teams", title: "Test Meeting")
+        defer { loop.stop() }
 
         XCTAssertEqual(
             sourceAtTransition, .appOnly(pid: 4242),
-            "the channel-health wiring reads this from the transition; nil there means no monitoring for auto-detected meetings",
+            "the channel-health wiring reads this from the transition; nil there means no monitoring for manual recordings",
         )
     }
 
-    func testHandleMeetingExposesActiveRecorderForChannelHealthPolling() async throws {
+    func testActiveRecorderIsExposedDuringRecordingAndClearedAfterStop() async throws {
         let recorder = CapturingRecorder()
         let loop = WatchLoop(
-            detector: ImmediatelyInactiveDetector(),
             recorderFactory: { recorder },
             pipelineQueue: nil,
             pollInterval: 0.01,
-            endGracePeriod: 0.01,
             maxDuration: 10,
             noMic: true,
         )
@@ -104,29 +97,24 @@ final class WatchLoopActiveRecorderTests: XCTestCase {
             captured = loop?.activeRecorder
         }
 
-        let meeting = DetectedMeeting(
-            pattern: .teams,
-            windowTitle: "Test Meeting | Microsoft Teams",
-            ownerName: "Microsoft Teams",
-            windowPID: 9999,
-        )
-
-        try await loop.handleMeeting(meeting)
-
-        XCTAssertTrue(recorder.startCalled, "recorder.start must be called during handleMeeting")
+        try await loop.startManualRecording(pid: 9999, appName: "Microsoft Teams", title: "Test Meeting")
+        XCTAssertTrue(recorder.startCalled, "recorder.start must be called during startManualRecording")
         XCTAssertEqual(
-            recorder.capturedSource, .appOnly(pid: meeting.windowPID),
-            "auto-watch start must tap the detected meeting's window PID, and the loop's noMic=true must reach the recorder as an app-only source",
+            recorder.capturedSource, .appOnly(pid: 9999),
+            "a manual start must tap the requested PID, and the loop's noMic=true must reach the recorder as an app-only source",
         )
-        XCTAssertTrue(recorder.stopCalled, "recorder.stop must be called during handleMeeting")
+
+        loop.stopManualRecording()
+
+        XCTAssertTrue(recorder.stopCalled, "recorder.stop must be called during stopManualRecording")
         XCTAssertIdentical(
             captured as AnyObject?,
             recorder,
-            "activeRecorder must reference the recorder the loop is driving while handleMeeting runs",
+            "activeRecorder must reference the recorder the loop is driving while stopManualRecording runs",
         )
         XCTAssertNil(
             loop.activeRecorder,
-            "activeRecorder must be cleared after handleMeeting returns (defer)",
+            "activeRecorder must be cleared after stopManualRecording returns",
         )
     }
 }

@@ -13,7 +13,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         try await super.setUp()
         tmpDir = try makeTempDirectory(prefix: "watchloop_e2e")
 
-        // Ensure recordingsDir exists (handleMeeting writes intermediate 16kHz files there)
+        // Ensure recordingsDir exists (recording start writes intermediate 16kHz files there)
         try FileManager.default.createDirectory(
             at: AppPaths.recordingsDir,
             withIntermediateDirectories: true,
@@ -41,16 +41,6 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         return outPath
     }
 
-    /// Create a mock meeting for testing.
-    private func makeMeeting(pid: pid_t = 9999) -> DetectedMeeting {
-        DetectedMeeting(
-            pattern: .teams,
-            windowTitle: "Test Meeting | Microsoft Teams",
-            ownerName: "Microsoft Teams",
-            windowPID: pid,
-        )
-    }
-
     /// Create a PipelineQueue with mocks for E2E testing.
     private func makeQueue(
         engine: (any TranscribingEngine)? = nil,
@@ -70,27 +60,37 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         )
     }
 
-    /// Create a WatchLoop with injected mocks and immediate meeting-end detection.
+    /// Create a WatchLoop with an injected mock recorder, driven through the
+    /// manual-recording path (the only recording path left after auto-watch
+    /// removal): `startManualRecording` + explicit `stopManualRecording`
+    /// stands in for what `handleMeeting` used to do end-to-end (recorder
+    /// start → recorder stop → enqueue).
     private func makeLoop(
         recorder: MockRecorder,
         pipelineQueue: PipelineQueue,
     ) -> WatchLoop {
-        let detector = PowerAssertionDetector()
-        // Meeting ends immediately (no assertions)
-        detector.assertionProvider = { [:] }
-
-        return WatchLoop(
-            detector: detector,
+        let loop = WatchLoop(
             recorderFactory: { recorder },
             pipelineQueue: pipelineQueue,
             pollInterval: 0.05,
-            endGracePeriod: 0.1,
             maxDuration: 10,
             noMic: false,
         )
+        loop.permissionChecker = {
+            HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
+        }
+        return loop
     }
 
-    // MARK: - 1. Full Pipeline: detect → record → enqueue → transcribe → protocol
+    /// Runs a manual recording start-then-stop cycle standing in for the old
+    /// `handleMeeting(meeting)` call: same recorder start/stop + enqueue
+    /// contract, driven from the surviving entry point.
+    private func recordOnceAndStop(_ loop: WatchLoop, pid: pid_t = 9999) async throws {
+        try await loop.startManualRecording(pid: pid, appName: "Microsoft Teams", title: "Test Meeting")
+        loop.stopManualRecording()
+    }
+
+    // MARK: - 1. Full Pipeline: record → enqueue → transcribe → protocol
 
     func testFullPipelineDetectRecordTranscribeProtocol() async throws {
         try skipIfCIWithoutE2EOptIn("requires WhisperKit model download")
@@ -117,8 +117,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         )
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
-        let meeting = makeMeeting()
-        try await loop.handleMeeting(meeting)
+        try await recordOnceAndStop(loop)
 
         // Verify recording happened
         XCTAssertTrue(recorder.startCalled)
@@ -178,8 +177,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         )
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
-        let meeting = makeMeeting()
-        try await loop.handleMeeting(meeting)
+        try await recordOnceAndStop(loop)
 
         // Verify dual-source paths were stored in the job
         XCTAssertEqual(queue.jobs.count, 1)
@@ -223,8 +221,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         )
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
-        let meeting = makeMeeting()
-        try await loop.handleMeeting(meeting)
+        try await recordOnceAndStop(loop)
 
         XCTAssertEqual(queue.jobs.count, 1)
         XCTAssertEqual(queue.jobs[0].state, .waiting)
@@ -267,8 +264,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         )
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
-        let meeting = makeMeeting()
-        try await loop.handleMeeting(meeting)
+        try await recordOnceAndStop(loop)
         await queue.processNext()
 
         // Protocol should still be generated (diarization skipped gracefully)
@@ -278,32 +274,6 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
 
         // Verify the transcript was passed as non-diarized
         XCTAssertFalse(mockProtocol.capturedDiarized ?? true, "Should be marked as non-diarized")
-    }
-
-    // MARK: - 5. Cooldown Prevents Re-detection After Handling
-
-    func testCooldownPreventsRedetectionAfterHandling() {
-        let detector = PowerAssertionDetector(confirmationCount: 1)
-        detector.windowListProvider = { [] }
-
-        let teamsAssertions: [Int32: [[String: Any]]] = [
-            1234: [[
-                "Process Name": "MSTeams",
-                "AssertName": "Microsoft Teams Call in progress",
-            ]],
-        ]
-        detector.assertionProvider = { teamsAssertions }
-
-        // First detection succeeds
-        let firstDetection = detector.checkOnce()
-        XCTAssertNotNil(firstDetection, "Should detect meeting on first check")
-
-        // Reset with cooldown
-        detector.reset(appName: "Microsoft Teams")
-
-        // Second detection should fail due to cooldown
-        let secondDetection = detector.checkOnce()
-        XCTAssertNil(secondDetection, "Should NOT detect meeting during cooldown")
     }
 
     // MARK: - 6. Resample Path Produces 16kHz for WhisperKit
@@ -399,8 +369,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
 
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
-        let meeting = makeMeeting()
-        try await loop.handleMeeting(meeting)
+        try await recordOnceAndStop(loop)
 
         XCTAssertEqual(queue.jobs.count, 1)
 
@@ -441,7 +410,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
 
     // MARK: - 8. WatchLoop Enqueues Job After Recording
 
-    func testHandleMeetingEnqueuesJob() async throws {
+    func testManualRecordingEnqueuesJob() async throws {
         let mixPath = tmpDir.appendingPathComponent("test_mix.wav")
         let samples = [Float](repeating: 0.1, count: 48000)
         try AudioMixer.saveWAV(samples: samples, sampleRate: 48000, url: mixPath)
@@ -452,8 +421,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
         let queue = PipelineQueue(logDir: tmpDir)
         let loop = makeLoop(recorder: recorder, pipelineQueue: queue)
 
-        let meeting = makeMeeting()
-        try await loop.handleMeeting(meeting)
+        try await recordOnceAndStop(loop)
 
         // Verify a job was enqueued
         XCTAssertEqual(queue.jobs.count, 1, "Should enqueue exactly one job")

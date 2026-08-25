@@ -110,27 +110,6 @@ final class WatchingControllerRecordControlTests: XCTestCase {
         XCTAssertTrue(loop.isManualRecording)
     }
 
-    /// The refusal that carries the most weight, and the one the ownership
-    /// guards inside `beginManualRecording` do *not* provide: an auto-detected
-    /// meeting sets no `manualRecordingInfo`, so `isManualRecording` reads false
-    /// and a start would sail past them and clobber a meeting in progress. Only
-    /// the availability check above stands between a remote key press and that.
-    func testStartIsBlockedWhileAnAutoDetectedMeetingIsBeingRecorded() async {
-        let controller = makeWatchingController(logDir: tmpDir)
-        let (loop, _) = makeTestWatchLoop(detector: FixedMeetingDetector())
-        controller.watchLoop = loop
-        loop.start()
-        addTeardownBlock { await loop.stop() }
-        await waitFor(loop.state == .recording, timeout: .seconds(2))
-        XCTAssertFalse(loop.isManualRecording, "precondition: this is what makes the guards below insufficient")
-
-        let outcome = await controller.applyRecordAction(.start)
-
-        XCTAssertEqual(outcome, .blocked)
-        XCTAssertIdentical(controller.watchLoop, loop, "the meeting's loop must still be the owner")
-        XCTAssertEqual(loop.state, .recording, "the meeting must still be recording")
-    }
-
     /// The distinction the endpoint exists to make, in the direction nothing
     /// covered: a recorder that will not start is 503 "try again", NOT the 412
     /// that tells a client to stop retrying until it changes a setting.
@@ -149,24 +128,6 @@ final class WatchingControllerRecordControlTests: XCTestCase {
 
         XCTAssertEqual(outcome, .failed, "a device that will not open is transient, not a precondition")
         XCTAssertFalse(controller.isRecordingMicrophoneOnly)
-    }
-
-    /// A refused start must not leave the machine blind. The start stops an
-    /// active auto loop before it knows whether it can record, so without the
-    /// re-arm a 412 answers "nothing changed" while detection is off for good.
-    func testARefusedStartPutsMeetingWatchingBack() async {
-        let controller = makeWatchingController(
-            logDir: tmpDir,
-            permissionHealth: HealthCheckResult(screenRecording: .healthy, microphone: .denied),
-        )
-        addTeardownBlock { await controller.stopManualRecording() }
-        await controller.startWatching()
-        XCTAssertTrue(controller.isWatching, "precondition")
-
-        let outcome = await controller.applyRecordAction(.start)
-
-        XCTAssertEqual(outcome, .refused)
-        XCTAssertTrue(controller.isWatching, "a refusal must not switch meeting detection off")
     }
 
     /// The bound the docs promise, and the half of the predicate that would
@@ -196,19 +157,6 @@ final class WatchingControllerRecordControlTests: XCTestCase {
 
         XCTAssertEqual(outcome, .failed, "a start that never settles is a 503, not a hang")
         XCTAssertLessThan(elapsed, .milliseconds(400), "one bound, not two, and not unbounded")
-    }
-
-    /// The guard behind the race above, at the only layer that can be pinned:
-    /// the interleaving itself (a meeting starting between the caller's check
-    /// and the takeover) is not something a test can schedule reliably.
-    func testALoopThatIsRecordingMayNotBeTakenOver() {
-        XCTAssertFalse(WatchingController.mayTakeOverLoop(in: .recording))
-        for state in [WatchLoop.State.idle, .watching, .error] {
-            XCTAssertTrue(
-                WatchingController.mayTakeOverLoop(in: state),
-                "only a recording is untouchable; \(state) may be taken over",
-            )
-        }
     }
 
     /// D1, directly: the start this call launches must be bounded too. The
@@ -411,26 +359,6 @@ final class WatchingControllerRecordControlTests: XCTestCase {
 
         XCTAssertEqual(outcome, .unchanged)
         XCTAssertTrue(loop.isManualRecording, "a stop scoped to another pid must change nothing")
-    }
-
-    /// The doctrine case: an auto-detected meeting of the *same* app is still
-    /// not this endpoint's recording — the caller never started it, so a stop
-    /// naming its pid must leave it running.
-    func testAppScopedStopLeavesAnAutoDetectedMeetingOfTheSameAppAlone() async {
-        let controller = makeWatchingController(logDir: tmpDir)
-        let meeting = makeTestMeeting(pid: 4242)
-        let (loop, _) = makeTestWatchLoop(detector: FixedMeetingDetector(meeting))
-        controller.watchLoop = loop
-        loop.start()
-        addTeardownBlock { await loop.stop() }
-        await waitFor(loop.state == .recording, timeout: .seconds(2))
-
-        let outcome = await controller.applyRecordAction(
-            RecordActionPayload(action: .stop, source: .app, pid: 4242),
-        )
-
-        XCTAssertEqual(outcome, .unchanged)
-        XCTAssertEqual(loop.state, .recording, "the meeting must still be recording")
     }
 
     // MARK: - System source ("Record Meeting")

@@ -42,10 +42,6 @@
 
             // A representative default from each sub-object — enough to prove
             // the projection reads live values, not hardcoded zeros.
-            XCTAssertTrue(s.detection.watchTeams)
-            XCTAssertFalse(s.detection.autoWatch)
-            XCTAssertEqual(s.detection.pollIntervalSeconds, 3.0)
-            XCTAssertEqual(s.recording.endGraceSeconds, 15.0)
             XCTAssertFalse(s.recording.recordOnly)
             XCTAssertEqual(s.recording.micName, "Me")
             XCTAssertTrue(s.recording.perChannelIndicatorEnabled)
@@ -65,11 +61,9 @@
         // MARK: - Snapshot reflects flipped values (mutation-proof target)
 
         func test_snapshot_reflectsFlippedValues() {
-            settings.autoWatch = true
             settings.recordOnly = true
             settings.liveTranscriptionEnabled = true
             settings.noMic = true
-            settings.endGrace = 42
             settings.micName = "Bob"
             settings.micDeviceUID = "AppleUSBAudioEngine:Test"
             settings.numSpeakers = 3
@@ -81,11 +75,9 @@
 
             let s = settings.rpcSettingsSnapshot()
 
-            XCTAssertTrue(s.detection.autoWatch)
             XCTAssertTrue(s.recording.recordOnly)
             XCTAssertTrue(s.recording.liveTranscriptionEnabled)
             XCTAssertTrue(s.recording.noMic)
-            XCTAssertEqual(s.recording.endGraceSeconds, 42)
             XCTAssertEqual(s.recording.micName, "Bob")
             XCTAssertEqual(s.recording.micDeviceUID, "AppleUSBAudioEngine:Test")
             XCTAssertEqual(s.diarization.numSpeakers, 3)
@@ -222,9 +214,7 @@
             collect(object, prefix: "")
 
             let allowlist: Set = [
-                "detection.watchTeams", "detection.watchZoom", "detection.watchWebex",
-                "detection.autoWatch", "detection.pollIntervalSeconds",
-                "recording.endGraceSeconds", "recording.noMic", "recording.recordOnly",
+                "recording.noMic", "recording.recordOnly",
                 "recording.micDeviceUID", "recording.micName",
                 "recording.perChannelIndicatorEnabled", "recording.liveTranscriptionEnabled",
                 "recording.asymmetricSilenceWarningSeconds",

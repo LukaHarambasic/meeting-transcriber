@@ -11,7 +11,6 @@ final class ManualRecordingTests: XCTestCase {
         let mock = recorder ?? MockRecorder()
         mock.mixPath = URL(fileURLWithPath: "/tmp/test_mix.wav")
         let loop = WatchLoop(
-            detector: MeetingDetector(patterns: AppMeetingPattern.all),
             recorderFactory: { mock },
             pipelineQueue: pipelineQueue,
             pollInterval: 0.05,
@@ -310,18 +309,5 @@ final class ManualRecordingTests: XCTestCase {
         XCTAssertEqual(queue.jobs.count, 1)
         XCTAssertEqual(queue.jobs.first?.meetingTitle, ManualRecordingInfo.meetingTitle)
         XCTAssertEqual(queue.jobs.first?.appName, ManualRecordingInfo.meetingAppName)
-    }
-
-    // MARK: - Auto-watch interaction
-
-    func testStartManualRecordingStopsAutoWatch() async throws {
-        let (loop, _) = makeLoop()
-        loop.start()
-        XCTAssertEqual(loop.state, .watching)
-
-        try await loop.startManualRecording(pid: 1234, appName: "Chrome", title: "Meeting")
-        XCTAssertEqual(loop.state, .recording)
-        XCTAssertTrue(loop.isManualRecording)
-        loop.stop()
     }
 }
