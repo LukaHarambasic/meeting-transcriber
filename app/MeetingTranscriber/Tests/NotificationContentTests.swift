@@ -108,11 +108,6 @@ final class NotificationContentTests: XCTestCase {
 
     // MARK: - No notification for intermediate states
 
-    func testWatchingNoNotification() {
-        let status = makeStatus(state: .watching)
-        XCTAssertNil(NotificationManager.notificationContent(for: .watching, status: status))
-    }
-
     func testTranscribingNoNotification() {
         let status = makeStatus(state: .transcribing)
         XCTAssertNil(NotificationManager.notificationContent(for: .transcribing, status: status))
