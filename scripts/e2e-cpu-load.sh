@@ -94,8 +94,10 @@ SETTLE_TIMEOUT_S=120
 # heavy live path (tap -> resampler -> VAD -> engine) is actually running
 # before the live-captions window starts.
 CAPTION_DEADLINE_S=90
-# Time from simulator start to watchState == "recording" — gates the
-# captions-off window, where no caption signal exists.
+# Bound for /v1/record.state to read "recording" after the explicit
+# POST /v1/record start — gates the captions-off window, where no caption
+# signal exists. start_app_recording_via_api itself already confirms the
+# start within its own 20s bound; this is a generous outer confirmation.
 RECORDING_DEADLINE_S=60
 
 # --- helpers --------------------------------------------------------------
@@ -291,8 +293,8 @@ _model_loaded() {
 
 _recording_active() {
     local state
-    state="$(rpc /state)"
-    [ -n "$state" ] && jq -e '.watchState == "recording"' <<<"$state" >/dev/null 2>&1
+    state="$(rpc /v1/record)"
+    [ -n "$state" ] && jq -e '.state == "recording"' <<<"$state" >/dev/null 2>&1
 }
 
 _live_path_hot() {
@@ -315,10 +317,12 @@ measure_window() {
 # non-steady-state load into the numbers — flagged, not failed, per the
 # log-first policy.
 contamination_flag() {
-    local flag
-    flag="$(rpc /state | jq -r \
-        '(.watchState != "recording") or .pipeline.isProcessing or (.pipeline.activeJobCount > 0)' \
-        2>/dev/null)"
+    local rec_state pipeline_state flag
+    rec_state="$(rpc /v1/record | jq -r '.state // empty' 2>/dev/null)"
+    pipeline_state="$(rpc /state)"
+    flag="$(jq -r --arg recState "$rec_state" \
+        '($recState != "recording") or .pipeline.isProcessing or (.pipeline.activeJobCount > 0)' \
+        <<<"$pipeline_state" 2>/dev/null)"
     if [ "$flag" = "true" ]; then printf 'true'; else printf 'false'; fi
 }
 
@@ -332,7 +336,10 @@ defaults write "$BUNDLE_ID" liveTranscriptionEnabled -bool false
 defaults write "$BUNDLE_ID" recordOnly -bool true
 defaults write "$BUNDLE_ID" transcriptionEngine -string parakeet
 defaults write "$BUNDLE_ID" debugRPCEnabled -bool true
-defaults write "$BUNDLE_ID" autoWatch -bool true
+# autoWatch OFF: both sessions below start their own recording explicitly via
+# POST /v1/record (source=app, targeting the simulator's pid) rather than
+# relying on WatchLoop to auto-detect the simulator's power assertion.
+defaults write "$BUNDLE_ID" autoWatch -bool false
 
 launch_app_and_wait
 
@@ -351,9 +358,12 @@ log "Starting meeting-simulator → $SIMULATOR_FIXTURE"
 "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" >/tmp/e2e-cpu-load-sim.log 2>&1 &
 SIM_PID=$!
 
-log "Waiting for recording to start (watchState == recording, timeout ${RECORDING_DEADLINE_S}s)"
+log "Starting recording via POST /v1/record (source=app pid=$SIM_PID)"
+start_app_recording_via_api "$SIM_PID" "MeetingSimulator" "E2E CPU-Load Meeting"
+
+log "Waiting for recording to start (/v1/record.state == recording, timeout ${RECORDING_DEADLINE_S}s)"
 poll_until "$RECORDING_DEADLINE_S" 2 _recording_active \
-    || fail "recording never started within ${RECORDING_DEADLINE_S}s — detector or TCC problem?"
+    || fail "recording never started within ${RECORDING_DEADLINE_S}s — TCC problem?"
 
 log "Window 2/3 — recording WITHOUT live captions: ${ACTIVE_WINDOW_S}s"
 REC_SUMMARY="$(measure_window "$ACTIVE_WINDOW_S")"
@@ -389,6 +399,9 @@ log "Starting meeting-simulator → $SIMULATOR_FIXTURE (session B)"
 { echo "=== session B ==="; } >>/tmp/e2e-cpu-load-sim.log
 "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" >>/tmp/e2e-cpu-load-sim.log 2>&1 &
 SIM_PID=$!
+
+log "Starting recording via POST /v1/record (source=app pid=$SIM_PID)"
+start_app_recording_via_api "$SIM_PID" "MeetingSimulator" "E2E CPU-Load Meeting"
 
 log "Waiting for first finalised caption (proves live path is hot, timeout ${CAPTION_DEADLINE_S}s)"
 poll_until "$CAPTION_DEADLINE_S" 3 _live_path_hot \

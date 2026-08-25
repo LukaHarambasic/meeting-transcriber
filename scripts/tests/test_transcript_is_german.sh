@@ -4,8 +4,9 @@
 # The gate exists to reject an English hallucination or garbage that slipped
 # past the >100-byte size check. It has to do that while accepting whatever
 # slice of the meeting the live lane happened to capture: recording starts only
-# once the app has DETECTED the meeting, so the opening seconds are never in the
-# transcript, and which sentences land varies run to run.
+# once POST /v1/record has confirmed the tap is attached, so the opening
+# seconds are never in the transcript, and which sentences land varies run to
+# run.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

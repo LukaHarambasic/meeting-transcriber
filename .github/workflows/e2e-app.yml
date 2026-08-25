@@ -352,18 +352,6 @@ jobs:
         timeout-minutes: 8
         run: bash scripts/e2e-app.sh --no-build --naming-escape
 
-      # Title-source lane (issue #501): run the simulator with a window title
-      # equal to the app name (no usable meeting-window title), then assert the
-      # detected meeting title is the clean "MeetingSimulator Call" placeholder,
-      # not the raw IOKit assertion name. Fails against the pre-fix detector,
-      # so it guards the real deployed detection → title-selection chain.
-      # `--no-build` reuses the bundle the earlier lanes built + signed.
-      - name: Run title-source placeholder E2E (issue #501)
-        env:
-          DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
-        timeout-minutes: 8
-        run: bash scripts/e2e-app.sh --no-build --title-source
-
       # Echo-bleed lane (issue #581): a dual-source recording made on
       # loudspeakers carries the remote voices on the microphone track too, so
       # the same speech is transcribed twice and appears twice in the

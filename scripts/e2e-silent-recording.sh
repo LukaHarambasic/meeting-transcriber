@@ -5,12 +5,12 @@
 #
 # Unlike scripts/e2e-channel-health.sh, this driver does NOT use a debug
 # env-hook to set the observable directly. Instead it:
-#   1. Launches the dev .app with autoWatch enabled (via defaults write).
-#   2. Launches tools/meeting-simulator with --silent → window with a
-#      MeetingDetector-matching title pops, but no audio is played.
-#   3. The app's MeetingDetector / PowerAssertionDetector picks up the
-#      simulator, WatchLoop transitions to .recording, the recorder taps
-#      the (silent) system output + mic.
+#   1. Launches the dev .app with autoWatch OFF — nothing here depends on
+#      detection firing.
+#   2. Launches tools/meeting-simulator with --silent → no audio is played.
+#   3. Starts a recording of that simulator process explicitly via
+#      POST /v1/record (source=app), WatchLoop transitions to .recording, the
+#      recorder taps the (silent) system output + mic.
 #   4. AppState's 10-Hz polling task feeds the (-120, -120) readings into
 #      SilentRecordingMonitor.
 #   5. After `asymmetricSilenceWarningSeconds` of sustained both-silent,
@@ -68,6 +68,11 @@ SIM="$ROOT/tools/meeting-simulator/.build/release/meeting-simulator"
 source "$ROOT/scripts/lib/bundle-ids.sh"
 BUNDLE_ID="$DEV_BUNDLE_ID"
 REC_DIR="$HOME/Library/Application Support/MeetingTranscriber/recordings"
+# Needed to call start_app_recording_via_api (lib/e2e-helpers.sh) directly —
+# same names/values scripts/e2e-app.sh uses for its own POST /v1/record calls.
+RPC_TOKEN_FILE="$HOME/Library/Application Support/MeetingTranscriber/.rpc-token"
+RPC_BASE="http://127.0.0.1:9876"
+RPC_TOKEN=""
 # Anchor for the EXIT-trap artifact sweep: created before any recording, so
 # every file this run produces is newer than it (see sweep_run_artifacts).
 RUN_START_MARKER="$(mktemp "${TMPDIR:-/tmp}/e2e-silent-rec-start.XXXXXX")"
@@ -162,6 +167,8 @@ fi
 for path in "$BIN" "$MTCLI" "$SIM"; do
     [ -x "$path" ] || die "required binary missing: $path — run without --no-build first"
 done
+command -v curl >/dev/null || die "missing command: curl"
+command -v jq >/dev/null || die "missing command: jq"
 
 # --- 2. Snapshot + override defaults so the test is deterministic -----------
 
@@ -169,7 +176,10 @@ SAVED_AUTOWATCH="$(snapshot_default "$BUNDLE_ID" autoWatch)"
 SAVED_THRESHOLD="$(snapshot_default "$BUNDLE_ID" asymmetricSilenceWarningSeconds)"
 SAVED_INDICATOR="$(snapshot_default "$BUNDLE_ID" perChannelIndicatorEnabled)"
 
-/usr/bin/defaults write "$BUNDLE_ID" autoWatch -bool true
+# autoWatch OFF: this lane starts its own recording explicitly via
+# POST /v1/record (step 5 below) rather than relying on WatchLoop to
+# auto-detect the simulator's power assertion.
+/usr/bin/defaults write "$BUNDLE_ID" autoWatch -bool false
 /usr/bin/defaults write "$BUNDLE_ID" asymmetricSilenceWarningSeconds -float 30
 /usr/bin/defaults write "$BUNDLE_ID" perChannelIndicatorEnabled -bool true
 
@@ -185,12 +195,13 @@ APP_PID=$!
 echo "▸ Waiting for RPC on 127.0.0.1:9876…"
 wait_for_rpc "$MTCLI" 30 || die "RPC server did not start within 30 s"
 echo "  RPC up"
+RPC_TOKEN="$(cat "$RPC_TOKEN_FILE" 2>/dev/null || true)"
+[ -n "$RPC_TOKEN" ] || die "no RPC token at $RPC_TOKEN_FILE"
 
 # --- 5. Trigger a "silent meeting" via meeting-simulator --------------------
 
-# Window title matches the simulator MeetingDetector pattern. --silent
-# means no audio is played, so the CATapDescription tap sees only zero
-# buffers (and the mic side stays at the BlackHole noise floor).
+# --silent means no audio is played, so the CATapDescription tap sees only
+# zero buffers (and the mic side stays at the BlackHole noise floor).
 # --duration covers the 30 s detector threshold + slack for the
 # polling task to flip the flag.
 echo "▸ Launching meeting-simulator (silent, 75 s)…"
@@ -201,9 +212,13 @@ echo "▸ Launching meeting-simulator (silent, 75 s)…"
 "$SIM" --silent --duration=75 &
 SIM_PID=$!
 
-# --- 6. Wait for WatchLoop to enter recording state ------------------------
+echo "▸ Starting recording via POST /v1/record (source=app pid=$SIM_PID)…"
+start_app_recording_via_api "$SIM_PID" "MeetingSimulator" "E2E Silent Meeting"
+echo "  recording confirmed"
 
-echo "▸ Waiting for app to detect + start recording (max 30 s)…"
+# --- 6. Wait for the pipeline to notice the recording is active ------------
+
+echo "▸ Waiting for the pipeline to notice the recording (max 30 s)…"
 # `isProcessing` flips true while a job is in the queue. It's informational
 # only — if it never flips we still let step 7 run and time out there,
 # which gives a clearer "recordingSilent never went true" failure than

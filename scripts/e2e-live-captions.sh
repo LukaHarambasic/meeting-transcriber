@@ -161,10 +161,13 @@ fi
 # These four defaults are the actual production seams the toggle uses.
 # Crucially we do NOT set any debug env var that bypasses the real chain
 # — the test must catch a regression in the wiring, not in a debug shim.
+# autoWatch OFF: this lane starts its own recording explicitly via
+# POST /v1/record (source=app, targeting the simulator's pid) below, rather
+# than relying on WatchLoop to auto-detect the simulator's power assertion.
 defaults write "$BUNDLE_ID" liveTranscriptionEnabled -bool true
 defaults write "$BUNDLE_ID" transcriptionEngine -string parakeet
 defaults write "$BUNDLE_ID" debugRPCEnabled -bool true
-defaults write "$BUNDLE_ID" autoWatch -bool true
+defaults write "$BUNDLE_ID" autoWatch -bool false
 
 # --- launch + wait for RPC ------------------------------------------------
 
@@ -205,6 +208,10 @@ trap on_exit EXIT INT TERM
 log "Starting meeting-simulator → $SIMULATOR_FIXTURE"
 "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" >/tmp/e2e-live-captions-sim.log 2>&1 &
 SIM_PID=$!
+
+log "Starting recording via POST /v1/record (source=app pid=$SIM_PID)"
+start_app_recording_via_api "$SIM_PID" "MeetingSimulator" "E2E Live Captions Meeting"
+log "Recording confirmed"
 
 log "Polling /state for liveCaptions.recentFinals (timeout ${CAPTION_DEADLINE_S}s)"
 deadline=$(( $(date +%s) + CAPTION_DEADLINE_S ))

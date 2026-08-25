@@ -263,12 +263,60 @@ sweep_run_artifacts() {
     fi
 }
 
+# Starts a manual recording of a specific process via `POST /v1/record`
+# (`source: "app"`) and blocks until `GET /v1/record` confirms it, bounded.
+# Every live-recording e2e driver used to rely on WatchLoop auto-detecting the
+# meeting-simulator's power assertion (`autoWatch` + detection latency); with
+# `autoWatch` off, nothing else will ever start that recording, so the driver
+# asks for it directly and confirms it before moving on. See
+# docs/automation-api.md > POST /v1/record for the wire contract.
+#
+#   $1 = pid of the target process (the meeting-simulator instance to record)
+#   $2 = appName shown in the menu bar / job list / record-only sidecar
+#   $3 = title (drives the meeting title + output-file naming)
+#
+# Reads `$RPC_BASE` and `$RPC_TOKEN` from the caller's scope — every e2e
+# driver that sources this file already sets both before its RPC calls (see
+# each script's own `rpc()`). Fails via `die` (this lives in the shared file,
+# not a driver, so it has no script-local `fail()` to call).
+start_app_recording_via_api() {
+    local pid="$1" app_name="$2" title="$3"
+    local status
+    # --max-time comfortably exceeds the server's own up-to-20s internal
+    # settle window (docs/automation-api.md's 503 discussion), so a slow
+    # settle surfaces as a real 503 rather than a client-side curl timeout
+    # that would misreport as HTTP 000.
+    status="$(curl --silent --show-error --max-time 25 -o /dev/null -w '%{http_code}' \
+        -X POST \
+        --header "Authorization: Bearer $RPC_TOKEN" \
+        --header "Content-Type: application/json" \
+        --data "$(jq -nc --argjson pid "$pid" --arg a "$app_name" --arg t "$title" \
+            '{action:"start", source:"app", pid:$pid, appName:$a, title:$t}')" \
+        "$RPC_BASE/v1/record" 2>/dev/null || echo '000')"
+    [ "$status" = "200" ] \
+        || die "POST /v1/record (source=app pid=$pid) returned HTTP $status (expected 200) — another recording active, or the Screen Recording grant denied/broken?"
+
+    # The server itself blocks the POST above for up to 20 s to settle the
+    # start (per docs/automation-api.md's 503 discussion), so a 200 here should
+    # already mean state=="recording" — this poll is a bounded confirmation,
+    # not the primary wait.
+    local state=""
+    _start_app_recording_settled() {
+        state="$(curl --silent --show-error --max-time 10 \
+            --header "Authorization: Bearer $RPC_TOKEN" \
+            "$RPC_BASE/v1/record" 2>/dev/null | jq -r '.state // empty')"
+        [ "$state" = "recording" ]
+    }
+    poll_until 20 1 _start_app_recording_settled \
+        || die "/v1/record.state never reached \"recording\" within 20s after starting pid=$pid (last state='${state:-<empty>}')"
+}
+
 # Common German words, matched whole. Function words rather than words from the
 # fixture's script, because the live lane cannot choose which part of the
-# meeting it records: the app starts recording only once it has DETECTED the
-# meeting, so the opening seconds are never captured and the remaining slice
-# shifts run to run. Measured over 13 runs, a content-word list drawn from the
-# script matched exactly [Status Entwicklung] twelve times and [Entwicklung]
+# meeting it records: the recording only starts once POST /v1/record has
+# confirmed the tap is attached, so the opening seconds are never captured and
+# the remaining slice shifts run to run. Measured over 13 runs, a content-word
+# list drawn from the script matched exactly [Status Entwicklung] twelve times and [Entwicklung]
 # once — a ceiling of 2 against a floor of 2, so the gate was one dropped word
 # from red while nothing was wrong with the recording.
 #
