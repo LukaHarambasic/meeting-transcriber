@@ -484,6 +484,11 @@ final class WatchingController {
             loop.permissionChecker = { health }
         }
 
+        // Unlike `startWatching`, a manual tap start has no moment that asks
+        // for Screen Recording up front — on a fresh install the tap would
+        // silently capture silence (issue #524). A no-op once already granted.
+        if request.capturesAppAudio { requestScreenRecording() }
+
         do {
             switch request {
             case let .app(pid, appName, title):
@@ -491,6 +496,9 @@ final class WatchingController {
 
             case .microphone:
                 try await loop.startMicrophoneRecording()
+
+            case .meeting:
+                try await loop.startMeetingRecording()
             }
             // Read the title back off the loop rather than re-deriving it here:
             // the loop stamps it into `manualRecordingInfo`, and that is the

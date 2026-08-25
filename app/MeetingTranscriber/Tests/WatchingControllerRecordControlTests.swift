@@ -433,6 +433,79 @@ final class WatchingControllerRecordControlTests: XCTestCase {
         XCTAssertEqual(loop.state, .recording, "the meeting must still be recording")
     }
 
+    // MARK: - System source ("Record Meeting")
+
+    /// The payload shape `/v1/record` exposes for "Record Meeting". The pid
+    /// assertion carries the test the same way the app-scoped one does: a
+    /// start that answered 200 but recorded the microphone instead of the
+    /// system-wide source would pass a status-only check.
+    func testSystemScopedStartRecordsTheMeetingAndReportsTheChange() async {
+        let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
+        addTeardownBlock { await controller.stopManualRecording() }
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .start, source: .system),
+        )
+
+        XCTAssertEqual(outcome, .changed)
+        XCTAssertEqual(controller.watchLoop?.manualRecordingInfo?.appName, ManualRecordingInfo.meetingAppName)
+        XCTAssertNil(controller.watchLoop?.manualRecordingInfo?.pid, "a system-wide recording targets no process")
+        XCTAssertFalse(controller.isRecordingMicrophoneOnly, "the target is the whole system, not the microphone")
+    }
+
+    func testSystemScopedStopEndsItsOwnRecording() async {
+        let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
+        addTeardownBlock { await controller.stopManualRecording() }
+        let started = await controller.applyRecordAction(RecordActionPayload(action: .start, source: .system))
+        XCTAssertEqual(started, .changed, "precondition")
+
+        let outcome = await controller.applyRecordAction(RecordActionPayload(action: .stop, source: .system))
+
+        XCTAssertEqual(outcome, .changed)
+        XCTAssertNil(controller.watchLoop?.manualRecordingInfo)
+    }
+
+    /// The scoping rule again, this time between the microphone endpoint and
+    /// the system one: a mic-scoped stop must leave a running meeting
+    /// recording alone.
+    func testMicScopedStopLeavesAMeetingRecordingAlone() async {
+        let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
+        let started = await controller.applyRecordAction(RecordActionPayload(action: .start, source: .system))
+        XCTAssertEqual(started, .changed, "precondition")
+        addTeardownBlock { await controller.stopManualRecording() }
+
+        let outcome = await controller.applyRecordAction(.stop)
+
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertTrue(controller.watchLoop?.isManualRecording ?? false, "the meeting recording must survive")
+    }
+
+    /// The 409 for a meeting start against an app recording already running,
+    /// mirroring `testStartIsBlockedWhileAnAppRecordingOwnsTheLoop`.
+    func testMeetingStartIsBlockedWhileAnAppRecordingOwnsTheLoop() async throws {
+        let controller = makeWatchingController(logDir: tmpDir)
+        let loop = try await appRecording(on: controller)
+
+        let outcome = await controller.applyRecordAction(RecordActionPayload(action: .start, source: .system))
+
+        XCTAssertEqual(outcome, .blocked)
+        XCTAssertIdentical(controller.watchLoop, loop, "the live recording must keep the loop")
+    }
+
+    /// Under "No Microphone", a meeting start still proceeds — it drops the
+    /// mic channel rather than being refused, unlike a plain microphone start.
+    func testSystemScopedStartProceedsUnderNoMicAsSystemOnly() async {
+        let controller = makeWatchingController(logDir: tmpDir, noMic: true, permissionHealth: .allHealthy)
+        addTeardownBlock { await controller.stopManualRecording() }
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .start, source: .system),
+        )
+
+        XCTAssertEqual(outcome, .changed, "the system tap still captures something under no-mic")
+        XCTAssertEqual(controller.watchLoop?.activeRecordingSource, .systemOnly)
+    }
+
     // MARK: - Toggle
 
     func testToggleStartsThenStops() async {

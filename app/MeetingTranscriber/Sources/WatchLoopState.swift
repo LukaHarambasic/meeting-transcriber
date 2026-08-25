@@ -45,7 +45,18 @@ extension WatchLoop {
     var activeRecordingSource: RecordingSource? {
         guard state == .recording else { return nil }
         if let info = manualRecordingInfo {
-            return info.pid.map { .forApp(pid: $0, noMic: noMic) } ?? .micOnly
+            if let pid = info.pid { return .forApp(pid: pid, noMic: noMic) }
+            // A pid-less manual recording is either the microphone-only entry
+            // point or "Record Meeting" — both target no single process, so
+            // `pid` alone cannot tell them apart. `appName` can: it is never
+            // user-supplied for either (`startMicrophoneRecording` and
+            // `startMeetingRecording` always pass their own fixed
+            // `ManualRecordingInfo` constant), so this reads the same fixed
+            // identity the job and the record-only sidecar already agree on,
+            // not user input that could collide with it.
+            return info.appName == ManualRecordingInfo.meetingAppName
+                ? .forSystem(noMic: noMic)
+                : .micOnly
         }
         return currentMeeting.map { .forApp(pid: $0.windowPID, noMic: noMic) }
     }
