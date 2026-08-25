@@ -91,7 +91,7 @@
         let watchStatus: () -> WatchStatusDTO // GET /v1/watch
         let watchControl: (WatchAction) async -> WatchControlOutcome // POST /v1/watch
         let recordStatus: () -> RecordStatusDTO // GET /v1/record
-        let recordControl: (RecordAction) async -> RecordControlOutcome // POST /v1/record
+        let recordControl: (RecordActionPayload) async -> RecordControlOutcome // POST /v1/record
         var idempotency = IdempotencyStore() // Idempotency-Key -> job IDs; internal for the +V1 extension
         private let expectedAuth: String
         private var listener: NWListener?
@@ -121,7 +121,7 @@
             watchStatus: @escaping () -> WatchStatusDTO = { .notWatching },
             watchControl: @escaping (WatchAction) async -> WatchControlOutcome = { _ in .failed },
             recordStatus: @escaping () -> RecordStatusDTO = { .notRecording },
-            recordControl: @escaping (RecordAction) async -> RecordControlOutcome = { _ in .failed },
+            recordControl: @escaping (RecordActionPayload) async -> RecordControlOutcome = { _ in .failed },
         ) {
             self.port = NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port.any
             self.expectedAuth = "Bearer \(token)"

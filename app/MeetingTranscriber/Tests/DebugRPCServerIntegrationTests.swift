@@ -46,7 +46,7 @@
             watchStatus: @escaping () -> WatchStatusDTO = { .notWatching },
             watchControl: @escaping (WatchAction) async -> WatchControlOutcome = { _ in .failed },
             recordStatus: @escaping () -> RecordStatusDTO = { .notRecording },
-            recordControl: @escaping (RecordAction) async -> RecordControlOutcome = { _ in .failed },
+            recordControl: @escaping (RecordActionPayload) async -> RecordControlOutcome = { _ in .failed },
         ) async throws -> URL {
             let server = DebugRPCServer(
                 port: 0,
@@ -1237,8 +1237,8 @@
                         noMic: false, microphoneHealthy: true,
                     )
                 },
-                recordControl: { action in
-                    guard action == .start else { return .unchanged }
+                recordControl: { payload in
+                    guard payload.action == .start else { return .unchanged }
                     isRecording = true
                     return .changed
                 },
@@ -1255,7 +1255,7 @@
 
         func testV1RecordPOSTUnchangedReturns200() async throws {
             // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
-            let control: (RecordAction) -> RecordControlOutcome = { _ in .unchanged }
+            let control: (RecordActionPayload) -> RecordControlOutcome = { _ in .unchanged }
             let base = try await startServer(recordControl: control)
             var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
             req.httpBody = Data(#"{"action":"stop"}"#.utf8)
@@ -1302,7 +1302,7 @@
 
         func testV1RecordPOSTFailedReturns503() async throws {
             // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
-            let control: (RecordAction) -> RecordControlOutcome = { _ in .failed }
+            let control: (RecordActionPayload) -> RecordControlOutcome = { _ in .failed }
             let base = try await startServer(recordControl: control)
             var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
             req.httpBody = Data(#"{"action":"start"}"#.utf8)
@@ -1312,10 +1312,52 @@
 
         func testV1RecordPOSTUnknownActionReturns400() async throws {
             // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
-            let control: (RecordAction) -> RecordControlOutcome = { _ in .changed }
+            let control: (RecordActionPayload) -> RecordControlOutcome = { _ in .changed }
             let base = try await startServer(recordControl: control)
             var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
             req.httpBody = Data(#"{"action":"pause"}"#.utf8)
+            let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 400)
+        }
+
+        /// An app-scoped start reaches the controller with everything the wire
+        /// carried. The closure records the payload so the assertion covers the
+        /// decode, not just the status code — a silently dropped pid would still
+        /// answer 200 and then record the microphone instead of the app.
+        func testV1RecordPOSTAppSourceCarriesTargetToControl() async throws {
+            let received = PayloadBox()
+            let control: (RecordActionPayload) async -> RecordControlOutcome = { payload in
+                await received.store(payload)
+                return .changed
+            }
+            let base = try await startServer(recordControl: control)
+
+            var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
+            req.httpBody = Data(
+                #"{"action":"start","source":"app","pid":4242,"appName":"MeetingSimulator","title":"E2E Meeting"}"#
+                    .utf8,
+            )
+            let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
+
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            let payload = await received.read()
+            XCTAssertEqual(payload?.source, .app)
+            XCTAssertEqual(payload?.pid, 4242)
+            XCTAssertEqual(payload?.appName, "MeetingSimulator")
+            XCTAssertEqual(payload?.title, "E2E Meeting")
+        }
+
+        /// An app source without a pid names nothing recordable; the route must
+        /// answer 400 before the controller is involved, not fall back to a
+        /// microphone recording the caller never asked for.
+        func testV1RecordPOSTAppSourceWithoutPidReturns400() async throws {
+            let control: (RecordActionPayload) -> RecordControlOutcome = { _ in
+                XCTFail("an invalid payload must never reach the controller")
+                return .changed
+            }
+            let base = try await startServer(recordControl: control)
+            var req = request("POST", base.appendingPathComponent("v1/record"), headers: authHeader)
+            req.httpBody = Data(#"{"action":"start","source":"app"}"#.utf8)
             let (_, response) = try await URLSession.shared.upload(for: req, from: XCTUnwrap(req.httpBody))
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 400)
         }
@@ -1476,6 +1518,20 @@
             done = true
             continuation.resume(returning: body)
             connection.cancel()
+        }
+    }
+
+    /// Collects the payload a record-control closure received, so a test can
+    /// assert on the decode across the server's concurrency boundary.
+    actor PayloadBox {
+        private var value: RecordActionPayload?
+
+        func store(_ payload: RecordActionPayload) {
+            value = payload
+        }
+
+        func read() -> RecordActionPayload? {
+            value
         }
     }
 #endif

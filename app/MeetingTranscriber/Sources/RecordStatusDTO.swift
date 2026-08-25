@@ -109,9 +109,65 @@ enum RecordControlOutcome: Equatable {
     case failed
 }
 
+/// What a `POST /v1/record` records. Absent from the payload means the
+/// microphone — the payload's original, only shape — so every existing client
+/// keeps the meaning it was written against.
+///
+/// `app` is the same capture the app picker starts: the target process's audio
+/// plus the microphone (unless "No Microphone" is set). It exists on the wire so
+/// automation can record a specific app without a human in front of the picker.
+enum RecordSource: String, Codable {
+    case microphone = "mic"
+    case app
+}
+
 /// Request body for `POST /v1/record`. An unrecognised action string fails to
 /// decode, which the route turns into a 400 — better than silently treating a
 /// typo'd verb as a toggle.
+///
+/// The optional fields describe the recording's target and are read only where
+/// `source` makes them meaningful; `manualRecordingRequest` is the one place
+/// that mapping lives, and its nil is what the route answers 400 with (an app
+/// source without a pid names nothing recordable).
 struct RecordActionPayload: Codable, Equatable {
     let action: RecordAction
+    let source: RecordSource?
+    /// Target process for `source == .app`; required there, ignored otherwise.
+    let pid: Int32?
+    /// Display name for the recording (menu bar, job list, sidecar). Read only
+    /// for `source == .app`; defaults to "App".
+    let appName: String?
+    /// Meeting title, which drives output-file naming. Read only for
+    /// `source == .app`; defaults to the app name.
+    let title: String?
+
+    init(
+        action: RecordAction,
+        source: RecordSource? = nil,
+        pid: Int32? = nil,
+        appName: String? = nil,
+        title: String? = nil,
+    ) {
+        self.action = action
+        self.source = source
+        self.pid = pid
+        self.appName = appName
+        self.title = title
+    }
+
+    /// The manual-recording request this payload asks for, or nil when the
+    /// payload names nothing recordable (an app source without a pid). The
+    /// route turns that nil into a 400 before the controller is involved.
+    var manualRecordingRequest: ManualRecordingRequest? {
+        switch source ?? .microphone {
+        case .microphone:
+            return .microphone
+
+        case .app:
+            guard let pid else { return nil }
+            let name = appName.flatMap { $0.isEmpty ? nil : $0 } ?? "App"
+            let title = title.flatMap { $0.isEmpty ? nil : $0 } ?? name
+            return .app(pid: pid_t(pid), appName: name, title: title)
+        }
+    }
 }

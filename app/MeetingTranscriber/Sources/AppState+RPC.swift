@@ -216,12 +216,12 @@
         /// there is anything true to report.
         func recordRPCClosures() -> (
             status: () -> RecordStatusDTO,
-            control: (RecordAction) async -> RecordControlOutcome,
+            control: (RecordActionPayload) async -> RecordControlOutcome,
         ) {
             let status: () -> RecordStatusDTO = { [weak self] in
                 self?.recordStatusDTO() ?? .notRecording
             }
-            let control: (RecordAction) async -> RecordControlOutcome = { [weak self] action in
+            let control: (RecordActionPayload) async -> RecordControlOutcome = { [weak self] payload in
                 guard let self else { return .failed }
                 // Seed the health cache before answering. The status projection
                 // reads that cache while the gate inside the start path falls
@@ -231,7 +231,7 @@
                 // is wrong. One probe closes that, and after it both sides read
                 // the same value.
                 if permissions.health == nil { await permissions.check() }
-                return await watching.applyRecordAction(action)
+                return await watching.applyRecordAction(payload)
             }
             return (status, control)
         }

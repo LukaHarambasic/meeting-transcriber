@@ -66,7 +66,7 @@ per connection; exceeding it closes the connection without sending a response.
 | `GET`  | `/v1/watch` | Read whether the app is watching for meetings. |
 | `POST` | `/v1/watch` | Start, stop or toggle meeting watching. |
 | `GET`  | `/v1/record` | Read whether a microphone-only recording is running. |
-| `POST` | `/v1/record` | Start, stop or toggle a microphone-only recording. |
+| `POST` | `/v1/record` | Start, stop or toggle a manual recording (microphone by default, or a specific app via `source`). |
 
 A query string is stripped before routing, so `/v1/jobs/<id>?foo=bar` still
 resolves the id. The one query parameter with meaning is `include=transcript`
@@ -281,20 +281,43 @@ state rather than failing.
 
 ### POST /v1/record
 
-Record the system microphone with no app audio, for a meeting happening in the
-room rather than in an app. The same thing the menu bar's *Record Microphone*
-item does.
+Start, stop or toggle a manual recording. With no `source` (or
+`"source":"mic"`) it records the system microphone with no app audio, for a
+meeting happening in the room rather than in an app — the same thing the menu
+bar's *Record Microphone* item does. With `"source":"app"` it records a
+specific process's audio plus the microphone, the same capture the menu bar's
+*Record App…* picker starts.
 
 ```bash
 curl -sS -X POST "$BASE/v1/record" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"action":"start"}'
+
+# Record a specific app (its audio + the microphone):
+curl -sS -X POST "$BASE/v1/record" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"start","source":"app","pid":4242,"appName":"MeetingSimulator","title":"Weekly Sync"}'
 ```
 
 `action` is `start`, `stop`, or `toggle`. Prefer `start`/`stop` for anything
 that fires from a button, key or schedule, for the reason spelled out under
 `POST /v1/watch`.
+
+For `"source":"app"`: `pid` is required (its absence is a `400`); `appName`
+(display name in the menu bar, job list and record-only sidecar, default
+`"App"`) and `title` (the meeting title, which drives output-file naming,
+default: the app name) are optional. Every action is **scoped to the recording
+the payload describes**: a `stop` with `"source":"app"` ends only a manual
+recording of that pid — never a microphone recording, never a recording of
+another app, and never an auto-detected meeting, even of the same app. The
+microphone-shaped payload keeps exactly its old meaning, so existing clients
+are unaffected. An app recording also ends on its own when the target process
+exits, enqueueing normally — automation can rely on that instead of `stop`.
+
+Note that "No Microphone (app audio only)" refuses only microphone starts with
+a `412`; an app-scoped start proceeds under it and records app audio alone.
 
 The response body is a [`RecordStatusDTO`](#recordstatusdto) describing the state
 **after** the action.

@@ -306,6 +306,122 @@ final class WatchingControllerRecordControlTests: XCTestCase {
         XCTAssertEqual(outcome, .failed, "no job was enqueued, so this was not a successful stop")
     }
 
+    // MARK: - App source
+
+    /// The payload shape automation uses to record a specific app without a
+    /// human in front of the picker. The pid assertion carries the test: a
+    /// start that answered 200 but recorded the microphone instead would pass
+    /// a status-only check.
+    func testAppScopedStartRecordsTheAppAndReportsTheChange() async {
+        let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
+        addTeardownBlock { await controller.stopManualRecording() }
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+        )
+
+        XCTAssertEqual(outcome, .changed)
+        XCTAssertEqual(controller.watchLoop?.manualRecordingInfo?.pid, 99)
+        XCTAssertFalse(controller.isRecordingMicrophoneOnly, "the target is the app, not the microphone")
+    }
+
+    /// "No Microphone" refuses a microphone start because nothing would be
+    /// captured under it. An app recording still captures the app's audio, so
+    /// the same switch must not refuse this one.
+    func testAppScopedStartProceedsWhileTheMicrophoneIsSwitchedOff() async {
+        let controller = makeWatchingController(logDir: tmpDir, noMic: true, permissionHealth: .allHealthy)
+        addTeardownBlock { await controller.stopManualRecording() }
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+        )
+
+        XCTAssertEqual(outcome, .changed, "no-mic gates the microphone, not an app capture")
+        XCTAssertEqual(controller.watchLoop?.manualRecordingInfo?.pid, 99)
+    }
+
+    /// Same idempotency rule the microphone start follows: an app recording of
+    /// the requested pid already running is the satisfied end state, and the
+    /// repeat must not build a second loop over the live one.
+    func testAppScopedRepeatStartIsUnchangedAndKeepsTheRecording() async {
+        let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
+        addTeardownBlock { await controller.stopManualRecording() }
+        let payload = RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting")
+        let started = await controller.applyRecordAction(payload)
+        XCTAssertEqual(started, .changed, "precondition")
+        let loop = controller.watchLoop
+
+        let outcome = await controller.applyRecordAction(payload)
+
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertIdentical(controller.watchLoop, loop, "the live recording must keep the loop")
+    }
+
+    /// The 409 in the other direction: a mic recording owns the loop and an
+    /// app-scoped start must refuse rather than clobber it.
+    func testAppScopedStartIsBlockedWhileAMicrophoneRecordingRuns() async throws {
+        let controller = makeWatchingController(logDir: tmpDir)
+        let loop = try await microphoneRecording(on: controller)
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+        )
+
+        XCTAssertEqual(outcome, .blocked)
+        XCTAssertIdentical(controller.watchLoop, loop, "the live recording must keep the loop")
+        XCTAssertTrue(controller.isRecordingMicrophoneOnly)
+    }
+
+    func testAppScopedStopEndsItsOwnRecording() async {
+        let controller = makeWatchingController(logDir: tmpDir, permissionHealth: .allHealthy)
+        addTeardownBlock { await controller.stopManualRecording() }
+        let started = await controller.applyRecordAction(
+            RecordActionPayload(action: .start, source: .app, pid: 99, appName: "Chrome", title: "Meeting"),
+        )
+        XCTAssertEqual(started, .changed, "precondition")
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .stop, source: .app, pid: 99),
+        )
+
+        XCTAssertEqual(outcome, .changed)
+        XCTAssertNil(controller.watchLoop?.manualRecordingInfo)
+    }
+
+    /// The pid is the scope, not a hint: a stop naming one app must not end a
+    /// recording of another.
+    func testAppScopedStopLeavesADifferentAppsRecordingAlone() async throws {
+        let controller = makeWatchingController(logDir: tmpDir)
+        let loop = try await appRecording(on: controller) // pid 99
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .stop, source: .app, pid: 100),
+        )
+
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertTrue(loop.isManualRecording, "a stop scoped to another pid must change nothing")
+    }
+
+    /// The doctrine case: an auto-detected meeting of the *same* app is still
+    /// not this endpoint's recording — the caller never started it, so a stop
+    /// naming its pid must leave it running.
+    func testAppScopedStopLeavesAnAutoDetectedMeetingOfTheSameAppAlone() async {
+        let controller = makeWatchingController(logDir: tmpDir)
+        let meeting = makeTestMeeting(pid: 4242)
+        let (loop, _) = makeTestWatchLoop(detector: FixedMeetingDetector(meeting))
+        controller.watchLoop = loop
+        loop.start()
+        addTeardownBlock { await loop.stop() }
+        await waitFor(loop.state == .recording, timeout: .seconds(2))
+
+        let outcome = await controller.applyRecordAction(
+            RecordActionPayload(action: .stop, source: .app, pid: 4242),
+        )
+
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertEqual(loop.state, .recording, "the meeting must still be recording")
+    }
+
     // MARK: - Toggle
 
     func testToggleStartsThenStops() async {
