@@ -27,7 +27,7 @@ set -euo pipefail
 APP_AFTER=quit           # quit | leave
 SIMULATOR_FIXTURE=""     # custom audio fixture for the simulator
 NO_BUILD=false           # skip build/deploy/re-sign — use whatever's at ~/Applications already
-TWO_MEETINGS=false       # trigger two back-to-back meetings to validate cooldown + state reset
+TWO_MEETINGS=false       # trigger two back-to-back meetings to validate state reset across recordings
 MIC_ONLY=false           # drive a microphone-only recording over /v1/record and assert its sidecar
 RECORD_ONLY=false        # validate record-only mode (sidecar+WAV instead of transcript)
 REIMPORT_RECORDED=false  # chain a record-only meeting with re-import via POST /action/enqueueFile
@@ -38,7 +38,6 @@ CRASH_RECOVERY=false     # kill mid-recording + assert the orphan is recovered i
 REDEPLOY_ONLY=false      # rebuild + redeploy the canonical (non-fault) bundle and exit — restores a clean bundle after --mic-device-change
 NAMING_CONFIRM=false     # drive the speaker-naming CONFIRM path end-to-end via POST /v1/jobs/<id>/naming (see run_naming_confirm)
 NAMING_ESCAPE=false      # press a real Escape on the naming dialog + assert it dismisses without resolving (issue #577)
-TITLE_SOURCE=false       # drive the window-title lookup with a no-usable-title case + assert the clean placeholder (issue #501 title source)
 ECHO_BLEED=false         # feed a synthesised affected + clean pair through /v1/jobs and assert the echo verdict (see run_echo_bleed)
 
 while [ $# -gt 0 ]; do
@@ -58,7 +57,6 @@ while [ $# -gt 0 ]; do
         --redeploy-only)    REDEPLOY_ONLY=true ;;
         --naming-confirm)   NAMING_CONFIRM=true ;;
         --naming-escape)    NAMING_ESCAPE=true ;;
-        --title-source)     TITLE_SOURCE=true ;;
         --echo-bleed)       ECHO_BLEED=true ;;
         -h|--help)
             cat <<'HELP'
@@ -69,7 +67,7 @@ Usage: e2e-app.sh [--no-build] [--keep-app] [--two-meetings] [--record-only]
 
   --no-build           Skip build/deploy/re-sign; use ~/Applications/MeetingTranscriber-Dev.app as-is.
   --keep-app           Leave the dev app running on exit. Default: quit it.
-  --two-meetings       Run two meetings back-to-back (cooldown + state-reset coverage).
+  --two-meetings       Run two meetings back-to-back (state-reset coverage).
   --mic-only           Record the microphone with no app audio (issue #633) via
                        POST /v1/record, and assert the sidecar carries a mic track
                        and NO app track. Reroutes the default OUTPUT to BlackHole
@@ -133,12 +131,6 @@ Usage: e2e-app.sh [--no-build] [--keep-app] [--two-meetings] [--record-only]
                        pollutes the persistent speaker DB; that snapshot/restore
                        is $GITHUB_ACTIONS-gated, so a LOCAL run enrolls voices
                        into your real speaker DB (a warning is printed).
-  --title-source       Issue #501: run meeting-simulator with a window title equal
-                       to the app name (no usable meeting-window title), then assert
-                       the detected meeting title is the clean "MeetingSimulator Call"
-                       placeholder — not the raw IOKit assertion name. Fails against
-                       the pre-fix detector, so it proves the deployed
-                       detection → title-selection chain end-to-end.
   --echo-bleed         Assert the echo-bleed verdict end to end. Synthesises two
                        dual-source pairs from the shipped fixtures — one whose
                        microphone track carries the app track back from the
@@ -192,12 +184,12 @@ if [ "$NAMING_CONFIRM" = true ] && [ -n "$SIMULATOR_FIXTURE" ]; then
     exit 2
 fi
 # --mic-only drives its own recording over /v1/record and reroutes the machine's
-# audio output; sharing a run with a meeting lane would have the detector start a
-# second recording next to it.
+# audio output; sharing a run with a meeting lane would have that lane's own
+# POST /v1/record (source=app) start a second recording next to it.
 if [ "$MIC_ONLY" = true ] && { [ "$RECORD_ONLY" = true ] || [ "$NAMING_CONFIRM" = true ] \
     || [ "$NAMING_ESCAPE" = true ] || [ "$REIMPORT_RECORDED" = true ] || [ "$REIMPORT_LATEST" = true ] \
     || [ "$MIC_DEVICE_CHANGE" = true ] || [ "$CRASH_RECOVERY" = true ] || [ "$REDEPLOY_ONLY" = true ] \
-    || [ "$TWO_MEETINGS" = true ] || [ "$ECHO_BLEED" = true ] || [ "$TITLE_SOURCE" = true ]; }; then
+    || [ "$TWO_MEETINGS" = true ] || [ "$ECHO_BLEED" = true ]; }; then
     echo "Error: --mic-only is a standalone lane; incompatible with the other lane flags" >&2
     exit 2
 fi
@@ -206,7 +198,7 @@ fi
 if [ "$ECHO_BLEED" = true ] && { [ "$NAMING_CONFIRM" = true ] || [ "$NAMING_ESCAPE" = true ] \
     || [ "$RECORD_ONLY" = true ] || [ "$REIMPORT_RECORDED" = true ] || [ "$REIMPORT_LATEST" = true ] \
     || [ "$MIC_DEVICE_CHANGE" = true ] || [ "$CRASH_RECOVERY" = true ] || [ "$REDEPLOY_ONLY" = true ] \
-    || [ "$TWO_MEETINGS" = true ] || [ "$TITLE_SOURCE" = true ] || [ -n "$SIMULATOR_FIXTURE" ]; }; then
+    || [ "$TWO_MEETINGS" = true ] || [ -n "$SIMULATOR_FIXTURE" ]; }; then
     echo "Error: --echo-bleed is a standalone lane; incompatible with the other lane flags and --fixture" >&2
     exit 2
 fi
@@ -254,6 +246,12 @@ DEFAULT_FIXTURE="$ROOT/app/MeetingTranscriber/Tests/Fixtures/two_speakers_de.wav
 RPC_TOKEN_FILE="$HOME/Library/Application Support/MeetingTranscriber/.rpc-token"
 RPC_BASE="http://127.0.0.1:9876"
 
+# appName/title used for every simulator recording started via
+# start_app_recording_via_api (lib/e2e-helpers.sh) — cosmetic (menu bar, job
+# list, sidecar), never asserted on, so one constant pair covers every lane.
+SIMULATOR_APP_NAME="MeetingSimulator"
+SIMULATOR_RECORDING_TITLE="E2E Simulated Meeting"
+
 # Record-only output lands here — `AppPaths.downloadsProtocolsDir` +
 # `/recordings`. Unsandboxed (Homebrew variant) so this is a real path,
 # not a container-mapped one.
@@ -276,9 +274,10 @@ RECORD_ONLY_MARKER="/tmp/e2e-app-record-only-marker.$$"
 # fixture actually transcribed rather than an English hallucination.
 # The check itself lives in lib/e2e-helpers.sh as `transcript_is_german` and
 # keys on common German words, NOT on the fixture's script. Recording starts
-# only once the app has DETECTED the meeting, so the opening seconds are never
-# captured and which sentences land shifts run to run; a script-derived list
-# therefore measured recording-start timing, not transcription quality.
+# only once POST /v1/record has confirmed the tap is attached, so the opening
+# seconds are never captured and which sentences land shifts run to run; a
+# script-derived list therefore measured recording-start timing, not
+# transcription quality.
 # Applied only when the simulator plays the known fixture (and not the
 # mic-device-change survival lane); a custom --fixture keeps only the
 # >100-byte size check.
@@ -292,9 +291,10 @@ IS_DEFAULT_FIXTURE=false
 RPC_READY_TIMEOUT_S=30
 PIPELINE_TIMEOUT_S=240
 
-# Record-only skips the whole pipeline, so the budget is just: detector
-# notices the simulator stopped (~1 s poll) + endGrace (≥1 s) + recorder
-# finalize (~3 s) + sidecar write (instant). 60 s gives ample buffer.
+# Record-only skips the whole pipeline, so the budget is just: the simulator
+# process exits, WatchLoop's monitorManualRecording notices the pid died
+# (~3 s poll) + recorder finalize (~3 s) + sidecar write (instant). 60 s
+# gives ample buffer.
 RECORD_ONLY_DEADLINE_S=60
 
 # wav-verdict calibration, shared by every lane that asserts a track carries
@@ -311,11 +311,6 @@ WAV_VERDICT_FIXTURE_MIN_ACTIVE_S=25
 # the WAV's AVAudioFile close a moment before re-feeding it to the engine.
 # Observed worst case on Mini is ~1 s; 2 s is honest margin.
 RECORDER_FINALIZE_WAIT_S=2
-
-# WatchLoop's per-app cooldown (`MeetingDetector.swift` cooldownDuration
-# = 5 s) plus a 3 s buffer so the second meeting isn't suppressed as a
-# re-detection. Bump if MeetingDetector.cooldownDuration grows.
-INTER_MEETING_COOLDOWN_S=8
 
 # --- helpers --------------------------------------------------------------
 
@@ -568,12 +563,13 @@ if [ "$MIC_ONLY" = true ]; then
         || fail "--mic-only needs the default INPUT to be $_MIC_ONLY_DEVICE (the loopback it routes the output into), but it is '$_MIC_ONLY_INPUT'. Set it in System Settings > Sound, or unplug the device that took over."
 fi
 
-# `autoWatch` triggers the same `.autoWatchStart` notification an
-# explicit "Start Watching" menu click would — necessary because that
-# menu isn't reachable over SSH. `debugRPCEnabled` brings the RPC up at
-# launch instead of after a Settings toggle.
+# `debugRPCEnabled` brings the RPC up at launch instead of after a Settings
+# toggle. `autoWatch` stays OFF: every lane below starts its own recording
+# explicitly via POST /v1/record (source=app, targeting the simulator's pid)
+# instead of waiting for WatchLoop to auto-detect the simulator's power
+# assertion, so nothing here depends on detection firing.
 defaults write "$DEV_BUNDLE_ID" debugRPCEnabled -bool true
-defaults write "$DEV_BUNDLE_ID" autoWatch -bool true
+defaults write "$DEV_BUNDLE_ID" autoWatch -bool false
 # The echo dedup ships off, so the lane has to ask for it. Set unconditionally
 # rather than only for --echo-bleed: a stale toggle from an earlier run on the
 # same host would otherwise decide it, and the lane that asserts nothing is
@@ -880,10 +876,13 @@ on_exit() {
     _ON_EXIT_RAN=1
     [ -n "${SIM_PID:-}" ] && kill "$SIM_PID" 2>/dev/null || true
     if [ "$MIC_ONLY" = true ]; then
-        # The lane turns auto-watch off; nothing else here would turn it back
-        # on, and a human using the dev app on this host would find detection
-        # silently disabled.
-        defaults write "$DEV_BUNDLE_ID" autoWatch -bool true 2>/dev/null || true
+        # No-op restore: the preflight above now leaves autoWatch OFF for every
+        # lane (all of them start recording explicitly via the API), so there
+        # is nothing lane-specific to put back. Kept as an explicit write
+        # (rather than deleted outright) so a human re-enabling detection by
+        # hand — `defaults write "$DEV_BUNDLE_ID" autoWatch -bool true` — isn't
+        # silently reverted by the next e2e-app.sh run picking this lane.
+        defaults write "$DEV_BUNDLE_ID" autoWatch -bool false 2>/dev/null || true
     fi
     if [ "$RECORD_ONLY" = true ]; then
         defaults delete "$DEV_BUNDLE_ID" recordOnly 2>/dev/null || true
@@ -1075,6 +1074,14 @@ run_one_meeting() {
     log "$label: starting meeting-simulator → $SIMULATOR_FIXTURE"
     "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" >/tmp/e2e-app-sim.log 2>&1 &
     SIM_PID=$!
+
+    # autoWatch is off (see the preflight), so nothing detects the simulator's
+    # power assertion on its own — start the recording explicitly, targeting
+    # its pid, and the recording ends automatically when that pid exits
+    # (WatchLoop's monitorManualRecording polls pid liveness every ~3s).
+    log "$label: starting recording via POST /v1/record (source=app pid=$SIM_PID)"
+    start_app_recording_via_api "$SIM_PID" "$SIMULATOR_APP_NAME" "$SIMULATOR_RECORDING_TITLE"
+    log "$label: recording confirmed"
 
     _poll_for_new_lastjob_terminal "$label" ignore-recovered
     local lj_id="$POLL_LJ_ID" lj_state="$POLL_LJ_STATE"
@@ -1305,8 +1312,16 @@ run_one_record_only_meeting() {
     "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" >/tmp/e2e-app-sim.log 2>&1 &
     SIM_PID=$!
 
+    # autoWatch is off (see the preflight) — start the recording explicitly,
+    # targeting the simulator's pid.
+    log "$label: starting recording via POST /v1/record (source=app pid=$SIM_PID)"
+    start_app_recording_via_api "$SIM_PID" "$SIMULATOR_APP_NAME" "$SIMULATOR_RECORDING_TITLE"
+    log "$label: recording confirmed"
+
     # Block until the simulator finishes playing the fixture. Exit code is
-    # irrelevant; we assert on filesystem state below.
+    # irrelevant; we assert on filesystem state below. The recording itself
+    # ends when WatchLoop's monitorManualRecording notices this pid exit
+    # (~3s poll) and auto-stops.
     wait "$SIM_PID" || true
     SIM_PID=""
 
@@ -1324,9 +1339,11 @@ run_one_record_only_meeting() {
     jq -C . "$sidecar" | sed 's/^/    /'
 
     # Schema check in one jq invocation — emits "ok" or a human-readable reason.
+    # `trigger` is "manual" (not "auto"): this meeting is started explicitly via
+    # POST /v1/record rather than detected, same as the mic-only lane's sidecar.
     local schema_check
     schema_check="$(jq -r '
-        if .trigger != "auto" then "trigger != auto (got: \(.trigger // "absent"))"
+        if .trigger != "manual" then "trigger != manual (got: \(.trigger // "absent"))"
         elif (.files.mix // "") == "" then "files.mix missing"
         elif (.files.mix | endswith("_mix.wav") | not) then "files.mix doesn'\''t end with _mix.wav (got: \(.files.mix))"
         else "ok"
@@ -1470,10 +1487,15 @@ run_crash_recovery() {
     PRE_LAST_JOB_ID="$(rpc /state | jq -r '.lastJob.jobID // empty')"
     log "$label: pre-crash baseline lastJob.jobID=${PRE_LAST_JOB_ID:-<none>}"
 
-    # 1. Start a meeting so the app begins recording.
+    # 1. Start a meeting so the app begins recording. autoWatch is off (see the
+    #    preflight), so start it explicitly via POST /v1/record targeting the
+    #    simulator's pid instead of waiting for detection to fire.
     log "$label: starting meeting-simulator -> $SIMULATOR_FIXTURE"
     "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" >/tmp/e2e-app-sim.log 2>&1 &
     SIM_PID=$!
+    log "$label: starting recording via POST /v1/record (source=app pid=$SIM_PID)"
+    start_app_recording_via_api "$SIM_PID" "$SIMULATOR_APP_NAME" "$SIMULATOR_RECORDING_TITLE"
+    log "$label: recording confirmed"
 
     # 2. Wait until the recorder is writing the raw app temp (recording active).
     local orphan_tmp=""
@@ -1965,31 +1987,6 @@ run_naming_confirm() {
     log "$label: shared fixture intact after the lane ✅"
 }
 
-# Title-source lane (issue #501): drive the app's window-title lookup with a
-# title that is NOT usable — the window title equals the app name, which the
-# lookup skips — so PowerAssertionDetector finds no meeting-window title and
-# must fall back to the clean "<app> Call" placeholder. Pre-fix the detector
-# leaked the raw IOKit assertion name ("Simulator Meeting Call in progress")
-# instead, so this assertion fails against the old code (non-vacuous). Proves
-# the real deployed detection → title-selection → job-title chain, which the
-# unit tests can only exercise through injected seams.
-run_title_source() {
-    local label="[title-source]"
-    log "$label: starting meeting-simulator --title MeetingSimulator (no usable window title) → $SIMULATOR_FIXTURE"
-    "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" --title "MeetingSimulator" >/tmp/e2e-app-sim.log 2>&1 &
-    SIM_PID=$!
-
-    _poll_for_new_lastjob_terminal "$label" ignore-recovered
-    [ "$POLL_LJ_STATE" = "done" ] || fail "$label: lastJob.state == \"$POLL_LJ_STATE\", expected \"done\""
-
-    local meeting_title
-    meeting_title="$(rpc /state | jq -r '.lastJob.meetingTitle // empty')"
-    log "$label: lastJob.meetingTitle = \"$meeting_title\""
-    [ "$meeting_title" = "MeetingSimulator Call" ] \
-        || fail "$label: meetingTitle == \"$meeting_title\", expected \"MeetingSimulator Call\". The window title equalled the app name, so the title lookup should return nil and the detector substitute the placeholder; a leaked assertion name or window title means the title-source fix regressed."
-    log "$label: PASS — no usable window title fell back to the clean placeholder ✅"
-}
-
 # --- echo-bleed lane ------------------------------------------------------
 #
 # A dual-source recording made on loudspeakers carries the remote voices on the
@@ -2207,8 +2204,7 @@ if [ "$REIMPORT_LATEST" = true ]; then
     # Skip the live-record phase and reuse a WAV produced by an earlier
     # `--record-only --keep-recordings` run on this host. Picks the
     # freshest `*_mix.wav` in $RECORDINGS_DIR — eliminates the audible
-    # ~30 s playback + capture round and the meeting-detector cooldown
-    # that --reimport-recorded incurs.
+    # ~30 s playback + capture round that --reimport-recorded incurs.
     # Pick the freshest *_mix.wav by mtime. A single awk max-pass replaces
     # `sort -rn | head -1`: under `set -o pipefail`, `head` closing the pipe
     # after one line left `sort` writing into a closed pipe → SIGPIPE (exit
@@ -2246,9 +2242,10 @@ elif [ "$MIC_ONLY" = true ]; then
     run_mic_only
 elif [ "$RECORD_ONLY" = true ]; then
     if [ "$TWO_MEETINGS" = true ]; then
+        # Back-to-back: each meeting is started explicitly via POST /v1/record
+        # and only returns once its own job/sidecar landed, so there is no
+        # WatchLoop detection cooldown to wait out between them anymore.
         run_one_record_only_meeting "[1/2]"
-        log "Sleeping ${INTER_MEETING_COOLDOWN_S}s for WatchLoop cooldown before meeting 2"
-        sleep "$INTER_MEETING_COOLDOWN_S"
         run_one_record_only_meeting "[2/2]"
     else
         run_one_record_only_meeting "meeting"
@@ -2272,14 +2269,13 @@ elif [ "$NAMING_ESCAPE" = true ]; then
     run_naming_escape
 elif [ "$NAMING_CONFIRM" = true ]; then
     run_naming_confirm
-elif [ "$TITLE_SOURCE" = true ]; then
-    run_title_source
 elif [ "$ECHO_BLEED" = true ]; then
     run_echo_bleed
 elif [ "$TWO_MEETINGS" = true ]; then
+    # Back-to-back: each meeting is started explicitly via POST /v1/record and
+    # only returns once its own job reached done, so there is no WatchLoop
+    # detection cooldown to wait out between them anymore.
     run_one_meeting "[1/2]"
-    log "Sleeping ${INTER_MEETING_COOLDOWN_S}s for WatchLoop cooldown before meeting 2"
-    sleep "$INTER_MEETING_COOLDOWN_S"
     run_one_meeting "[2/2]"
 else
     run_one_meeting "meeting"

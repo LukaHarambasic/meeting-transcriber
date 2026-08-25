@@ -213,8 +213,11 @@ fi
 # Record-only: the soak is about the resident process over an hour, and running
 # transcription on every loop of the fixture would measure the ASR engine
 # instead. The pipeline assertion at the end re-enables the full path.
+# autoWatch OFF: the soak starts its own recording explicitly via
+# POST /v1/record (source=app, targeting the simulator's pid) below, rather
+# than relying on WatchLoop to auto-detect the simulator's power assertion.
 defaults write "$BUNDLE_ID" debugRPCEnabled -bool true
-defaults write "$BUNDLE_ID" autoWatch       -bool true
+defaults write "$BUNDLE_ID" autoWatch       -bool false
 defaults write "$BUNDLE_ID" recordOnly      -bool true
 
 mkdir -p "$REC_DIR"
@@ -250,6 +253,9 @@ MEETING_SECONDS=$((RECORDING_SETTLE_S + SOAK_MINUTES * 60))
 log "Starting meeting-simulator for ${MEETING_SECONDS}s (${SOAK_MINUTES}min measured + ${RECORDING_SETTLE_S}s ramp)"
 "$SIMULATOR_BIN" "$SIMULATOR_FIXTURE" --silent --duration "$MEETING_SECONDS" >/dev/null 2>&1 &
 SIM_PID=$!
+
+log "Starting recording via POST /v1/record (source=app pid=$SIM_PID)"
+start_app_recording_via_api "$SIM_PID" "MeetingSimulator" "E2E Soak Meeting"
 
 _is_recording() {
     local state
