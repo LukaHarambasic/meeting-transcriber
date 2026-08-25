@@ -8,15 +8,16 @@ import IOKit.pwr_mgt
 struct MeetingSimulator: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "meeting-simulator",
-        abstract: "Synthetic meeting trigger for the dev app's auto-detect path.",
+        abstract: "Audio source for the dev app's live E2E lanes.",
         discussion: """
-        Pops a window with a MeetingDetector-matching title and creates the same
-        IOKit power assertion a real Teams / Zoom call would. Plays the fixture
-        WAV through the system output so the CATapDescription tap captures real
-        audio. With --silent, the fixture is played at volume=0 so the audio
-        device stays active but the tap captures only zero-content buffers —
-        used by scripts/e2e-silent-recording.sh to exercise the
-        SilentRecordingMonitor path end-to-end.
+        Pops a window and creates an IOKit power assertion (vestigial: the app
+        has no meeting auto-detection to trigger, so the live E2E lanes record
+        this process directly via POST /v1/record source=app). Plays the
+        fixture WAV through the system output so the CATapDescription tap
+        captures real audio. With --silent, the fixture is played at volume=0
+        so the audio device stays active but the tap captures only
+        zero-content buffers — used by scripts/e2e-silent-recording.sh to
+        exercise the SilentRecordingMonitor path end-to-end.
         """,
     )
 
@@ -24,9 +25,9 @@ struct MeetingSimulator: ParsableCommand {
     var audioPath: String?
 
     @Option(name: .long, help: """
-    Window title the simulated meeting window shows. Detection fires off the
-    power assertion regardless; this title is what the app's title lookup sees,
-    so it drives the resulting meeting title / output filename. Default matches
+    Window title the simulated meeting window shows. Purely cosmetic since the
+    e2e lanes name their recordings via POST /v1/record; kept so a human
+    watching a lane can tell simulator windows apart. Default matches
     the MeetingSimulator meeting pattern. Set to "MeetingSimulator" (the app
     name) to exercise the no-usable-title placeholder path.
     """)
@@ -207,9 +208,9 @@ private func buildMeetingWindow(title: String) -> (NSWindow, NSTextField) {
 }
 
 /// Creates the same IOKit "prevent display sleep" assertion a real Teams /
-/// Zoom call creates; `PowerAssertionDetector` picks it up via
-/// `IOPMCopyAssertionsByProcess`. Returns the assertion ID so `AppDelegate`
-/// can release it on termination.
+/// Zoom call creates — inert since the app no longer watches assertions, kept
+/// so the simulator still behaves like a real call app. Returns the assertion
+/// ID so `AppDelegate` can release it on termination.
 private func createPowerAssertion() -> IOPMAssertionID {
     var assertionID: IOPMAssertionID = 0
     let result = IOPMAssertionCreateWithName(

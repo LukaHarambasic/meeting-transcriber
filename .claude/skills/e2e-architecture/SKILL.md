@@ -1,6 +1,6 @@
 ---
 name: e2e-architecture
-description: Reference for the E2E approaches (fixture-based xctest e2e.yml, live-recording e2e-app.yml/e2e-app.sh, browser-meeting e2e-browser.yml incl. the Jitsi variant), the CI trigger labels (run-e2e/run-quality), which to pick, why the live-recording variant exists, and the one-time self-hosted Mac mini runner setup. Read before changing e2e.yml, e2e-app.yml, e2e-browser.yml, scripts/e2e-app.sh, scripts/e2e-browser.sh, the naming-confirm lane, or the runner configuration.
+description: Reference for the E2E approaches (fixture-based xctest e2e.yml, live-recording e2e-app.yml/e2e-app.sh), the CI trigger labels (run-e2e/run-quality), which to pick, why the live-recording variant exists, and the one-time self-hosted Mac mini runner setup. Read before changing e2e.yml, e2e-app.yml, scripts/e2e-app.sh, the naming-confirm lane, or the runner configuration.
 ---
 
 # E2E Architecture
@@ -29,13 +29,21 @@ PRs are excluded from the self-hosted runner.
 - Strengths: fast, deterministic, isolates engine logic; runs in xctest's
   sandboxed harness without TCC concerns.
 - Limitations: can't catch regressions in the recording stack, the audio
-  routing path, TCC interactions, or detector → recorder handoff.
+  routing path, TCC interactions, or the `/v1/record` → recorder handoff.
 
 **Live-recording E2E (`e2e-app.yml`, `scripts/e2e-app.sh`)**
 - Builds the dev `.app`, deploys to `~/Applications/MeetingTranscriber-Dev.app`
-  (stable path → TCC permissions persist), launches it, triggers a meeting
-  via `meeting-simulator`, polls `DebugRPCServer`'s `/state` for
-  `lastJob.state == .done`, asserts on the resulting transcript file.
+  (stable path → TCC permissions persist), launches it, starts a recording of
+  `meeting-simulator`'s process via `POST /v1/record` (the shared
+  `start_app_recording_via_api` helper in `scripts/lib/e2e-helpers.sh` — starts
+  the source, `pid`, `appName`/`title`, then polls `/v1/record` until
+  `state == "recording"`), polls `DebugRPCServer`'s `/state` for
+  `lastJob.state == .done`, asserts on the resulting transcript file. There is
+  no meeting auto-detection to trigger: every lane starts its own recording
+  explicitly, and each preflight forces `autoWatch` off (a stale toggle from
+  before the setting was removed) as a defensive no-op.
+  An app recording auto-stops when the target pid exits, so most lanes never
+  call `stop` themselves — quitting `meeting-simulator` ends the recording.
 - Triggered on `workflow_dispatch`, every `push` to main (no paths-filter
   — so the stable-tag ruleset always has a push-event check-run on the
   SHA), a nightly cron at 04:30 UTC, and label-gated PR runs (apply the
@@ -63,7 +71,8 @@ PRs are excluded from the self-hosted runner.
   `speakers.json`/`recognition_log.jsonl` (`$GITHUB_ACTIONS`-gated) so the
   confirm never pollutes the persistent speaker DB.
 - The `--mic-only` lane (issue #633) records the microphone with no app audio,
-  driving `POST /v1/record` instead of a detected meeting, and asserts the
+  driving `POST /v1/record` with no `source` rather than the app-recording shape
+  every other lane uses, and asserts the
   record-only sidecar carries a mic track, `trigger` is `manual`, and there is
   **no** app track. That last one is the point: nothing else in the suite would
   notice a microphone-only recording quietly opening a process tap. It is the
@@ -103,51 +112,6 @@ PRs are excluded from the self-hosted runner.
 - Limitations: needs one-time runner setup (see below); can't run on
   GitHub-hosted runners — only on a self-hosted Mac with an interactive
   GUI session and a stable code-signing identity.
-
-**Browser-meeting E2E (`e2e-browser.yml`, `scripts/e2e-browser.sh`)**
-- Proves the issue #503 chain end-to-end without a real meeting service:
-  deploys the dev `.app` (`watchBrowserMeetings` + `recordOnly` + `noMic` +
-  RPC, reusing `e2e-app.sh --redeploy-only` for build/sign), opens Chrome with
-  the self-contained `scripts/fixtures/webrtc-tone.html` (an in-page pc1↔pc2
-  WebRTC loopback carrying a 440 Hz WebAudio tone), then answers the parked
-  consent prompt over RPC (`mt-cli confirm-browser-consent`) instead of a
-  click, records ~15 s, quits Chrome to end the meeting, and asserts the
-  record-only `_app.wav` is non-silent (`mt-cli wav-verdict`).
-- The consent prompt normally requires a click; the debug-RPC
-  `POST /action/confirmBrowserConsent` resolves the parked
-  `ConsentPromptCoordinator` continuation so the whole flow runs headless.
-  `askToRecord` parks and blocks the watch loop regardless of notification
-  permission, so the RPC resolve works even when notifications are denied.
-- Detection uses the sandbox-safe power-assertion path (no Screen Recording),
-  so it needs no extra TCC beyond e2e-app's; the only new runner prerequisite
-  is Google Chrome installed. No mic (`noMic`).
-- The signal the driver polls is `confirm-browser-consent` returning
-  `{"resolved":true}` (a prompt has parked) — detection alone can't be read
-  from `watchState` (it stays `"watching"` both before detection and while
-  deferring for consent). After granting, it polls `watchState == "recording"`.
-- NON-GATING canary: reports red but is not a required check and not in
-  `tag-ruleset.json`. The assertion-hold (does a loopback PeerConnection hold
-  "WebRTC has active PeerConnections") and tap-capture (does the CATap record
-  Chrome's shared-audio-service output) are verified live on the mini when the
-  lane is first brought up.
-- Limitation: like `e2e-app`, self-hosted mini only; the fixture's Chrome
-  assertion wording is Chrome-version-dependent (the likeliest flake vector).
-- **Real-meeting variant (`--jitsi`, `scripts/fixtures/jitsi-keeper.mjs`):** the
-  synthetic fixture is an in-page `pc1↔pc2` loopback, not a real remote meeting.
-  `e2e-browser.sh --jitsi` instead drives Chrome via CDP (puppeteer-core) so two
-  tabs join a REAL public Jitsi room (`meet.ffmuc.net`, no login — `meet.jit.si`
-  requires a moderator login since 2023) — a genuine 2-participant WebRTC SFU
-  meeting; each tab's `getUserMedia` is overridden to a 440 Hz WebAudio tone, so
-  no real mic is touched (the macOS Chrome **mic-TCC** gate otherwise *hangs*
-  `getUserMedia` on a headless runner, and `--use-file-for-fake-audio-capture`
-  is buggy on macOS). Verified live on the mini: Chrome holds the assertion
-  (detection fires) and the tone flows tab-A → real server → tab-B (`recvPeak`
-  ≈ the tone), so the CATap captures real server-transported meeting audio.
-  Runs **nightly/dispatch only, never on labeled PRs**, and `continue-on-error`
-  (best-effort, depends on a third-party public instance being up — an outage is
-  not our regression). Chrome must be installed; `~/Applications` works for a
-  runner user without `/Applications` write access, and `node`/`npm` are needed
-  (puppeteer-core is `npm i`-installed on demand into `scripts/fixtures`).
 
 **Why the live-recording variant exists** (history that's easy to lose):
 - An earlier attempt at xctest-framed live recording (PR #100,
@@ -193,9 +157,10 @@ PRs are excluded from the self-hosted runner.
 4. In the GUI session, launch the deployed `.app`
    (`open ~/Applications/MeetingTranscriber-Dev.app`). Click "Allow" on the
    Microphone prompt, and toggle the dev `.app` on under System Settings →
-   Privacy & Security → Screen & System Audio Recording (used for window-title
-   meeting detection — the e2e also has a sandbox-safe power-assertion detector,
-   so this one is belt-and-suspenders).
+   Privacy & Security → Screen & System Audio Recording (the fallback grant for
+   the `app`/`system`-source CATap when the "Audio Recording" grant is absent —
+   every live lane records `meeting-simulator` via `POST /v1/record`
+   `source: "app"`, so this is load-bearing, not belt-and-suspenders).
 5. Verify Microphone + Screen & System Audio Recording show the dev `.app`
    with the toggle on.
 6. Grant **Accessibility** and **Automation** for the `--naming-escape` lane.
