@@ -106,74 +106,7 @@ final class AppSettings {
     /// prompt that blocks the run.
     @ObservationIgnored private let apiKeyAccount: String
 
-    // MARK: - Apps to Watch
-
-    var watchTeams: Bool {
-        didSet { defaults.set(watchTeams, forKey: "watchTeams") }
-    }
-
-    var watchZoom: Bool {
-        didSet { defaults.set(watchZoom, forKey: "watchZoom") }
-    }
-
-    var watchWebex: Bool {
-        didSet { defaults.set(watchWebex, forKey: "watchWebex") }
-    }
-
-    /// Watch for browser-based meetings (Chromium browsers / WebRTC), issue #503.
-    /// Off by default — opt-in, and browser meetings prompt before recording
-    /// (the WebRTC signal isn't meeting-exclusive), unlike native auto-start.
-    var watchBrowserMeetings: Bool {
-        didSet { defaults.set(watchBrowserMeetings, forKey: "watchBrowserMeetings") }
-    }
-
-    /// Apps the user answered "Never for this app" about on a browser-meeting
-    /// consent prompt (see `ConsentDenyList`). Starts empty: there is nothing
-    /// to seed, because an app the user has approved is treated exactly like one
-    /// never seen (both still get the per-meeting prompt), so only refusals are
-    /// worth persisting.
-    var consentDeniedApps: [String] {
-        didSet { defaults.set(consentDeniedApps, forKey: "consentDeniedApps") }
-    }
-
-    /// Mic-input-detected call apps (see `MicInputDetector`). Off by default —
-    /// additive opt-in so existing installs see no new auto-recording behavior.
-    var watchWeChat: Bool {
-        didSet { defaults.set(watchWeChat, forKey: "watchWeChat") }
-    }
-
-    var watchTencentMeeting: Bool {
-        didSet { defaults.set(watchTencentMeeting, forKey: "watchTencentMeeting") }
-    }
-
-    var watchFaceTime: Bool {
-        didSet { defaults.set(watchFaceTime, forKey: "watchFaceTime") }
-    }
-
-    var watchWhatsApp: Bool {
-        didSet { defaults.set(watchWhatsApp, forKey: "watchWhatsApp") }
-    }
-
-    /// Auto-start watching on app launch.
-    var autoWatch: Bool {
-        didSet { defaults.set(autoWatch, forKey: "autoWatch") }
-    }
-
     // MARK: - Recording
-
-    var pollInterval: Double {
-        didSet {
-            if pollInterval < 1.0 { pollInterval = 1.0 }
-            defaults.set(pollInterval, forKey: "pollInterval")
-        }
-    }
-
-    var endGrace: Double {
-        didSet {
-            if endGrace < 1.0 { endGrace = 1.0 }
-            defaults.set(endGrace, forKey: "endGrace")
-        }
-    }
 
     var noMic: Bool {
         didSet { defaults.set(noMic, forKey: "noMic") }
@@ -462,24 +395,10 @@ final class AppSettings {
 
     // MARK: - Init
 
-    // swiftlint:disable:next function_body_length
     init(defaults: UserDefaults = .standard, apiKeyAccount: String = "openAIAPIKey") {
         self.defaults = defaults
         self.apiKeyAccount = apiKeyAccount
 
-        watchTeams = defaults.object(forKey: "watchTeams") as? Bool ?? true
-        watchZoom = defaults.object(forKey: "watchZoom") as? Bool ?? true
-        watchWebex = defaults.object(forKey: "watchWebex") as? Bool ?? true
-        watchBrowserMeetings = defaults.object(forKey: "watchBrowserMeetings") as? Bool ?? false
-        consentDeniedApps = defaults.stringArray(forKey: "consentDeniedApps") ?? []
-        watchWeChat = defaults.object(forKey: "watchWeChat") as? Bool ?? false
-        watchTencentMeeting = defaults.object(forKey: "watchTencentMeeting") as? Bool ?? false
-        watchFaceTime = defaults.object(forKey: "watchFaceTime") as? Bool ?? false
-        watchWhatsApp = defaults.object(forKey: "watchWhatsApp") as? Bool ?? false
-        autoWatch = defaults.object(forKey: "autoWatch") as? Bool ?? false
-
-        pollInterval = defaults.object(forKey: "pollInterval") as? Double ?? 3.0
-        endGrace = defaults.object(forKey: "endGrace") as? Double ?? 15.0
         noMic = defaults.object(forKey: "noMic") as? Bool ?? false
         recordOnly = defaults.object(forKey: "recordOnly") as? Bool ?? false
         micDeviceUID = defaults.object(forKey: "micDeviceUID") as? String ?? ""

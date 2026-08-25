@@ -1,13 +1,12 @@
 import Foundation
 
 /// The `/v1/record` control surface: manual recordings as an idempotent
-/// resource a remote caller can drive, alongside the watch control in
-/// `WatchingController` proper.
+/// resource a remote caller can drive.
 ///
-/// Its own file because that one sits at the line cap; the handful of members it
-/// reaches into (`settings`, `watchLoop`, `manualStartTask`, `joinStarts`,
-/// `joinManualStart`, `beginManualRecording`, `stopManualRecording`,
-/// `startWatching`) are internal rather than private for exactly that.
+/// Its own file because `WatchingController` sits at the line cap; the handful
+/// of members it reaches into (`settings`, `watchLoop`, `manualStartTask`,
+/// `joinManualStart`, `beginManualRecording`, `stopManualRecording`) are
+/// internal rather than private for exactly that.
 ///
 /// Every action is scoped to the recording its payload describes — the
 /// microphone when the payload names nothing else (the endpoint's original,
@@ -59,10 +58,7 @@ extension WatchingController {
 
     /// Whether the recording `request` describes is the one in progress.
     ///
-    /// The app case matches only a *manual* recording of the same pid: an
-    /// auto-detected meeting of that app is deliberately not "the requested
-    /// recording", because a caller who never started it must not be able to
-    /// stop it, and a start alongside it is a conflict, not a satisfied wish.
+    /// The app case matches only a recording of the same pid.
     private func isRecordingRequested(_ request: ManualRecordingRequest) -> Bool {
         switch request {
         case .microphone:
@@ -96,15 +92,15 @@ extension WatchingController {
 
     /// Apply a record action, resolving `.toggle` against settled state.
     ///
-    /// The join leads, for the reason `applyWatchAction` gives: deciding against
-    /// a mid-launch snapshot would read "nothing is recording" for a recording
-    /// that is seconds from running, and start a second one.
+    /// The join leads: deciding against a mid-launch snapshot would read
+    /// "nothing is recording" for a recording that is seconds from running, and
+    /// the start that follows would then be a second one.
     @discardableResult
     func applyRecordAction(_ payload: RecordActionPayload) async -> RecordControlOutcome {
         // The route 400s an invalid payload before calling in; this guard is for
         // direct callers, and .failed is honest — nothing was asked for.
         guard let request = payload.manualRecordingRequest else { return .failed }
-        guard await joinStarts() else { return .failed }
+        guard await joinManualStart() else { return .failed }
         switch payload.action {
         case .start: return await applyRecordStart(request)
 
@@ -127,8 +123,6 @@ extension WatchingController {
         // "No Microphone" refuses only a recording that would capture nothing
         // under it. An app recording still captures the app's audio.
         if case .microphone = request, settings.noMic { return .refused }
-        // Read before the start, because the start is what takes the loop away.
-        let wasWatching = isWatching
         // nil means an ownership guard refused between the check above and here.
         guard let start = beginManualRecording(request) else { return .blocked }
         // Bound the start we just launched, not only the ones we found running.
@@ -140,32 +134,18 @@ extension WatchingController {
         // between the task finishing and this line would turn a recording that
         // started, and was then deliberately ended, into "did not settle".
         case .started: return .changed
-        case .blockedByActiveRecording: return .blocked
-        case .permissionRefused: await rearmWatching(wasWatching); return .refused
-        case .failed: await rearmWatching(wasWatching); return .failed
+        case .permissionRefused: return .refused
+        case .failed: return .failed
         }
-    }
-
-    /// Put meeting watching back after a start that captured nothing.
-    ///
-    /// A manual start stops an active auto loop before it knows whether it can
-    /// record, so a refusal leaves detection off. That is survivable in the menu
-    /// bar, where the icon shows it. Over the API it is not: the answer says
-    /// "nothing changed, fix a setting and retry" while the machine has quietly
-    /// stopped watching for meetings, and nothing re-arms it until relaunch.
-    private func rearmWatching(_ wasWatching: Bool) async {
-        guard wasWatching, !isWatching else { return }
-        await startWatching()
     }
 
     /// Idempotent stop, and only of the recording the request describes.
     ///
     /// Anything else running reports `.unchanged` rather than `.blocked`: the
     /// requested recording is not in progress, so the asked-for end state
-    /// already holds and there is nothing to refuse. Same asymmetry
-    /// `stopWatching` documents, and the same reason — a stop that reached
-    /// across and ended somebody else's meeting would be far worse than a 200
-    /// that did nothing.
+    /// already holds and there is nothing to refuse — a stop that reached
+    /// across and ended somebody else's recording would be far worse than a
+    /// 200 that did nothing.
     private func applyRecordStop(matching request: ManualRecordingRequest) -> RecordControlOutcome {
         guard isRecordingRequested(request) else { return .unchanged }
         let loop = watchLoop

@@ -81,12 +81,8 @@ bootout_stale_launchctl
 
 # --- 3. Launch with debug env hooks --------------------------------------
 
-# `_SUPPRESS_AUTOWATCH=1` prevents the +3 s auto-watch trigger from running
-# `stopChannelHealthMonitoring()` which would clear the forced flag before
-# we can observe it.
 env MEETINGTRANSCRIBER_DEBUG_RPC=1 \
     MEETINGTRANSCRIBER_DEBUG_FORCE_MIC_SILENT=1 \
-    MEETINGTRANSCRIBER_DEBUG_SUPPRESS_AUTOWATCH=1 \
     "$BIN" &
 APP_PID=$!
 

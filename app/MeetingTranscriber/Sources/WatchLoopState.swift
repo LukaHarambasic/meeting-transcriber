@@ -1,13 +1,12 @@
 import Foundation
 
-/// Value-type snapshot of `WatchLoop`'s five observable fields. The class
+/// Value-type snapshot of `WatchLoop`'s four observable fields. The class
 /// keeps the fields as `@Observable` stored properties (so SwiftUI bindings
 /// continue working); `WatchLoopState` is the form tests and other readers
 /// (e.g. the RPC state snapshot) use for equality checks against a single
-/// value rather than five field-wise comparisons.
+/// value rather than four field-wise comparisons.
 struct WatchLoopState: Equatable {
     var phase: WatchLoop.State
-    var currentMeeting: DetectedMeeting?
     var lastError: String?
     var detail: String
     var manualRecordingInfo: ManualRecordingInfo?
@@ -16,7 +15,6 @@ struct WatchLoopState: Equatable {
     /// defaults declared on the class — see `WatchLoop.init`.
     static let initial = Self(
         phase: .idle,
-        currentMeeting: nil,
         lastError: nil,
         detail: "",
         manualRecordingInfo: nil,
@@ -43,31 +41,27 @@ extension WatchLoop {
     /// not a failure any of the flags downstream can distinguish from a quiet
     /// recording.
     var activeRecordingSource: RecordingSource? {
-        guard state == .recording else { return nil }
-        if let info = manualRecordingInfo {
-            if let pid = info.pid { return .forApp(pid: pid, noMic: noMic) }
-            // A pid-less manual recording is either the microphone-only entry
-            // point or "Record Meeting" — both target no single process, so
-            // `pid` alone cannot tell them apart. `appName` can: it is never
-            // user-supplied for either (`startMicrophoneRecording` and
-            // `startMeetingRecording` always pass their own fixed
-            // `ManualRecordingInfo` constant), so this reads the same fixed
-            // identity the job and the record-only sidecar already agree on,
-            // not user input that could collide with it.
-            return info.appName == ManualRecordingInfo.meetingAppName
-                ? .forSystem(noMic: noMic)
-                : .micOnly
-        }
-        return currentMeeting.map { .forApp(pid: $0.windowPID, noMic: noMic) }
+        guard state == .recording, let info = manualRecordingInfo else { return nil }
+        if let pid = info.pid { return .forApp(pid: pid, noMic: noMic) }
+        // A pid-less manual recording is either the microphone-only entry
+        // point or "Record Meeting" — both target no single process, so
+        // `pid` alone cannot tell them apart. `appName` can: it is never
+        // user-supplied for either (`startMicrophoneRecording` and
+        // `startMeetingRecording` always pass their own fixed
+        // `ManualRecordingInfo` constant), so this reads the same fixed
+        // identity the job and the record-only sidecar already agree on,
+        // not user input that could collide with it.
+        return info.appName == ManualRecordingInfo.meetingAppName
+            ? .forSystem(noMic: noMic)
+            : .micOnly
     }
 
-    /// Value-type view of the five observable fields. Useful for tests,
+    /// Value-type view of the four observable fields. Useful for tests,
     /// `AppState+RPC` snapshots, and as the input/output shape for the
     /// upcoming pure-function reducer slice.
     var snapshot: WatchLoopState {
         WatchLoopState(
             phase: state,
-            currentMeeting: currentMeeting,
             lastError: lastError,
             detail: detail,
             manualRecordingInfo: manualRecordingInfo,

@@ -2,10 +2,10 @@ import Foundation
 
 /// What the user asked `WatchingController` to record by hand.
 ///
-/// The two menu entry points differ only in what they target, and everything
-/// around the start (the ownership guards, settling a racing auto start,
+/// The menu entry points differ only in what they target, and everything
+/// around the start (the ownership guards, settling an in-flight start,
 /// building the loop, the notification) is identical. Carrying the difference
-/// as a value keeps that shared body in one place instead of two copies that
+/// as a value keeps that shared body in one place instead of copies that
 /// drift.
 enum ManualRecordingRequest {
     case app(pid: pid_t, appName: String, title: String)
@@ -20,8 +20,7 @@ extension ManualRecordingRequest {
     /// Whether this request opens a CATap process/system tap. `.app` and
     /// `.meeting` both do; only `.microphone` opens no tap at all. Read before
     /// a manual start to decide whether the Screen Recording grant needs
-    /// asking for — the one such start has no up-front moment for, unlike
-    /// `startWatching`.
+    /// asking for.
     var capturesAppAudio: Bool {
         switch self {
         case .app, .meeting: true
@@ -41,16 +40,9 @@ extension ManualRecordingRequest {
 enum ManualRecordingStartResult: Equatable {
     case started
 
-    /// A recording was already in progress when the start reached the point of
-    /// taking the loop over. Decided there rather than only at the caller's
-    /// guard, because that guard runs before the task is scheduled and the watch
-    /// loop can enter a meeting in between.
-    case blockedByActiveRecording
-
     /// A permission this recording needs is denied or broken, so nothing was
-    /// captured. Raised by `WatchLoop` from the same gate the auto-detect path
-    /// uses, rather than re-derived here, so the refusal names the permission
-    /// that actually blocks *this* source.
+    /// captured. Raised by `WatchLoop`'s own gate, so the refusal names the
+    /// permission that actually blocks *this* source.
     case permissionRefused
 
     /// The recorder itself would not start.

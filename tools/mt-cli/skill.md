@@ -16,8 +16,8 @@ machen" / "ist das im Menü sichtbar".
 - You want to see what the user sees → `mt-cli screenshot /tmp/x.png`, then Read it
 - You want to assert on UI structure (a Settings section exists, a control is enabled) without eyeballing a screenshot → `mt-cli ui-tree --window settings`
 - You want to drive a control (press a toggle/button) and check the effect → `mt-cli ui-press <identifier> --window settings`, then `mt-cli state`
-- You want to start or stop meeting watching without touching the menu bar → `mt-cli watch start` / `mt-cli watch stop` (prefer these over `toggle`, which flips blind)
-- You want to record the microphone for an in-person meeting → `mt-cli record start` / `mt-cli record stop`. A `412` means nothing would be recorded ("No Microphone" is set, or the mic permission is denied), and it will not clear by retrying; a `409` means something else is being recorded and the request refused rather than clobber it
+- You want to record the microphone for an in-person meeting → `mt-cli record start` / `mt-cli record stop` (prefer these over `toggle`, which flips blind). A `412` means nothing would be recorded ("No Microphone" is set, or the mic permission is denied), and it will not clear by retrying; a `409` means something else is being recorded and the request refused rather than clobber it
+- You want to record a specific app's audio, or the whole system output, instead of just the microphone → `mt-cli record start --source app --pid <pid> --app-name <name> --title <title>` or `mt-cli record start --source system`
 - You're debugging a UI bug and would otherwise have to ask the user to describe state
 - You're verifying a fix end-to-end after editing code
 
@@ -49,10 +49,8 @@ The app writes a 64-hex bearer token to
 | `GET /screenshot`   | `mt-cli screenshot` | PNG of frontmost window            |
 | `GET /ui/tree`      | `mt-cli ui-tree`    | Accessibility tree JSON (allowlisted windows) |
 | `POST /ui/press`    | `mt-cli ui-press`   | Press a control by identifier (allowlisted windows); assert via `state` |
-| `GET /v1/watch`     | `mt-cli watch`      | Whether the app is watching for meetings (`WatchStatusDTO`) |
-| `POST /v1/watch`    | `mt-cli watch start\|stop\|toggle` | Control watching; returns the resulting `WatchStatusDTO` |
-| `GET /v1/record`    | `mt-cli record`     | Whether a microphone-only recording is running (`RecordStatusDTO`) |
-| `POST /v1/record`   | `mt-cli record start\|stop\|toggle` | Control microphone recording; returns the resulting `RecordStatusDTO` |
+| `GET /v1/record`    | `mt-cli record`     | Whether a manual recording is running (`RecordStatusDTO`) |
+| `POST /v1/record`   | `mt-cli record start\|stop\|toggle [--source mic\|app\|system] [--pid <pid>] [--app-name <name>] [--title <title>]` | Control manual recording (microphone by default, or a specific app / the whole system); returns the resulting `RecordStatusDTO` |
 
 ## Build mt-cli
 

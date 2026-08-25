@@ -2,10 +2,8 @@ import SwiftUI
 
 struct MenuBarView: View {
     let status: TranscriberStatus?
-    let isWatching: Bool
     let pipelineQueue: PipelineQueue
     var updateChecker: UpdateChecker?
-    let onStartStop: () -> Void
     let onRecordMeeting: () -> Void
     let onRecordApp: () -> Void
     let onRecordMicrophone: () -> Void
@@ -61,7 +59,7 @@ struct MenuBarView: View {
 
         Divider()
 
-        watchControls
+        recordControls
         processingQueue
 
         Divider()
@@ -121,18 +119,7 @@ struct MenuBarView: View {
         }
     }
 
-    @ViewBuilder private var watchControls: some View {
-        Button {
-            onStartStop()
-        } label: {
-            if isWatching {
-                Label("Stop Watching", systemImage: "stop.fill")
-            } else {
-                Label("Start Watching", systemImage: "play.fill")
-            }
-        }
-        .keyboardShortcut("s")
-
+    @ViewBuilder private var recordControls: some View {
         if let onStopManualRecording {
             Button {
                 onStopManualRecording()

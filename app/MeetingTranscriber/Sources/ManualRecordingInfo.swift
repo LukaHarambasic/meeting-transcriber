@@ -1,7 +1,6 @@
 import Foundation
 
-/// Info about a manually started recording session, as opposed to one a
-/// detector started.
+/// Info about a manually started recording session.
 struct ManualRecordingInfo: Equatable {
     /// The process being recorded, or nil for a microphone-only recording,
     /// which targets no process at all. Also what the monitor watches: with no

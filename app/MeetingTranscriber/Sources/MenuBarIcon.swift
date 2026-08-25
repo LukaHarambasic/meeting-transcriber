@@ -439,18 +439,18 @@ extension BadgeKind {
     /// Computes the current badge from plain value inputs.
     ///
     /// This is a pure function with no object dependencies — tests can call it
-    /// directly with any combination of inputs without driving WatchLoop into states.
+    /// directly with any combination of inputs without driving a recording loop
+    /// into states.
     static func compute(
-        watchLoopActive: Bool,
-        watchLoopState: WatchLoop.State,
+        recordingActive: Bool,
         transcriberState: TranscriberState,
         activeJobState: JobState?,
         updateAvailable: Bool,
         permissionProblem: Bool = false,
     ) -> BadgeKind {
-        if watchLoopActive {
-            if watchLoopState == .recording { return .recording }
+        if recordingActive {
             switch transcriberState {
+            case .recording: return .recording
             case .waitingForSpeakerCount, .waitingForSpeakerNames: return .userAction
             case .protocolReady: return .done
             case .error: return .error

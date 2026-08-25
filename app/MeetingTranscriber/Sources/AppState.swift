@@ -19,35 +19,6 @@ protocol AppNotifying {
     /// exists to prevent. `notify(title:body:)` lives in the extension below.
     func notify(title: String, body: String, urgency: NotificationUrgency)
 
-    /// Ask the user whether to record a just-detected browser meeting (issue
-    /// #503); true = record. `@MainActor` — the real prompt is UI. Defaults to
-    /// false so a notifier without a prompt never records silently.
-    @MainActor
-    func askToRecord(title: String, body: String) async -> ConsentAnswer
-
-    /// Resolve a parked `askToRecord` prompt programmatically (the debug-RPC
-    /// consent hook, issue #503); returns whether one was waiting. Lives on the
-    /// same seam as `askToRecord` so park + resolve share it. Defaults to false
-    /// (no prompt) for notifiers without a real coordinator.
-    func resolveBrowserConsent(granted: Bool) -> Bool
-
-    /// How a posted notification would be presented. On the same seam as
-    /// `askToRecord` because it answers whether that prompt could be SEEN, which
-    /// decides whether browser meetings work at all (see
-    /// `BrowserConsentReadiness`).
-    ///
-    /// Here rather than as a probe closure on `PermissionsController` because
-    /// `NotificationManager` already owns both the scheduler port and the
-    /// `canDeliver` bundle guard this read needs; a separate closure would
-    /// re-derive that guard and add a second injection point to every test that
-    /// already injects a notifier.
-    ///
-    /// `@MainActor` for the same reason as `askToRecord`: `AppNotifying` is not
-    /// Sendable, so a non-isolated async requirement would force callers to send
-    /// the notifier across an actor boundary.
-    @MainActor
-    func notificationVisibility() async -> NotificationVisibility
-
     #if !APPSTORE
         /// Recently posted notifications, oldest first, for the debug RPC
         /// `/state.notifications` snapshot. Defaults to empty — only the
@@ -72,30 +43,6 @@ extension AppNotifying {
     /// become a lossy override of the requirement above.
     func notify(title: String, body: String) {
         notify(title: title, body: body, urgency: .standard)
-    }
-
-    // swiftlint:disable async_without_await
-    /// Deny by default — only `NotificationManager` shows a real prompt, and
-    /// "we could not ask" must never record.
-    @MainActor
-    func askToRecord(title _: String, body _: String) async -> ConsentAnswer {
-        .declined
-    }
-
-    /// Nothing to report by default. Notably this keeps
-    /// `UNUserNotificationCenter.current()` out of every headless context: it
-    /// raises NSInternalInconsistencyException without a real app bundle, so a
-    /// default that reached for it would abort any test touching the notifier.
-    @MainActor
-    func notificationVisibility() async -> NotificationVisibility {
-        .unread
-    }
-
-    // swiftlint:enable async_without_await
-
-    /// No prompt to resolve by default — only `NotificationManager` parks one.
-    func resolveBrowserConsent(granted _: Bool) -> Bool {
-        false
     }
 }
 
@@ -272,7 +219,6 @@ final class AppState {
             isRecording: { [weak self] in self?.watching.isRecording == true },
         )
         pipeline.activate { [weak self] in self?.engines.activeTranscriptionEngine }
-        watching.activate { [weak self] in self?.engines.syncEngineSettings() }
 
         #if !APPSTORE
             applyForcedChannelFlagsFromEnvironment()
@@ -330,10 +276,7 @@ final class AppState {
         /// E2E hook: force a per-channel silence flag on at launch so a driver
         /// script can assert the menu-bar red-tint pipeline end-to-end without
         /// orchestrating real audio. Only honoured in non-AppStore builds and
-        /// only when explicitly enabled via env var. The driver is also expected
-        /// to set `MEETINGTRANSCRIBER_DEBUG_SUPPRESS_AUTOWATCH=1` so an auto-watch
-        /// state transition doesn't clear the flag at +3 s through the regular
-        /// `channelHealth.stop()` path.
+        /// only when explicitly enabled via env var.
         private func applyForcedChannelFlagsFromEnvironment() {
             let env = ProcessInfo.processInfo.environment
             channelHealth.applyForcedFlagsForE2E(
@@ -376,13 +319,6 @@ final class AppState {
                     }
                 }
             }
-            // Answers a parked browser-meeting consent prompt (issue #503) so an
-            // e2e driver can confirm recording without a clickable notification.
-            // Rides the injected `notifier` seam — the same one `askToRecord`
-            // parks in (WatchLoop+Consent) — so park + resolve stay symmetric.
-            let confirmBrowserConsent: (Bool) -> Bool = { [weak self] granted in
-                self?.notifier.resolveBrowserConsent(granted: granted) ?? false
-            }
             // RPC counterpart to the NSOpenPanel "Open from Recording" flow.
             // Validates the file exists (RPC layer returns 400 on `false`),
             // then routes through the same `enqueueFiles` entry point the
@@ -413,7 +349,6 @@ final class AppState {
                 guard let self else { return .noFile }
                 return await pipeline.transcribeAndWait(path: url, maxWaitSeconds: maxWait)
             }
-            let watch = watchRPCClosures()
             let record = recordRPCClosures()
             return DebugRPCServer(
                 port: port,
@@ -421,7 +356,6 @@ final class AppState {
                 snapshot: snapshot,
                 speakerActions: makeSpeakerDBActions(),
                 skipNaming: skipNaming,
-                confirmBrowserConsent: confirmBrowserConsent,
                 enqueueFile: enqueueFile,
                 enqueueFiles: enqueueFilesRPC,
                 enqueueReturningIDs: enqueueReturningIDs,
@@ -430,8 +364,6 @@ final class AppState {
                 confirmNaming: naming.confirm,
                 skipJobNaming: naming.skip,
                 transcribe: transcribe,
-                watchStatus: watch.status,
-                watchControl: watch.control,
                 recordStatus: record.status,
                 recordControl: record.control,
             )
@@ -439,13 +371,6 @@ final class AppState {
     #endif
 
     // MARK: - Derived properties
-
-    /// Whether the auto-detect watch loop is active (not a manual recording).
-    /// Delegates to `watching`; exposed here as a single-member accessor so the
-    /// menu-bar body that reads `appState.isWatching` stays cheap to type-check.
-    var isWatching: Bool {
-        watching.isWatching
-    }
 
     /// True when the caption-bar overlay should be visible: captions are
     /// available per the shared gate (master toggle on, and either the engine
@@ -462,8 +387,7 @@ final class AppState {
     var currentBadge: BadgeKind {
         let loop = watching.watchLoop
         return BadgeKind.compute(
-            watchLoopActive: loop?.isActive == true,
-            watchLoopState: loop?.state ?? .idle,
+            recordingActive: loop?.isActive == true,
             transcriberState: loop?.transcriberState ?? .idle,
             activeJobState: pipeline.queue.activeJobs.first?.state,
             updateAvailable: updateChecker.availableUpdate != nil,
@@ -511,7 +435,7 @@ final class AppState {
     /// and the recording would begin a moment later regardless. The wider
     /// predicate belongs to the automation API, which asks the different
     /// question of whether a manual recording owns *or is about to own* the
-    /// loop; see `watchStatusDTO()`.
+    /// loop; see `recordStatusDTO()`.
     var isManualRecording: Bool {
         watching.watchLoop?.isManualRecording == true
     }
@@ -538,20 +462,12 @@ final class AppState {
     var currentStatus: TranscriberStatus? {
         guard let loop = watching.watchLoop, loop.isActive else { return nil }
 
-        let meeting: MeetingInfo? = if let manual = loop.manualRecordingInfo {
+        let meeting: MeetingInfo? = loop.manualRecordingInfo.map { manual in
             MeetingInfo(
                 app: manual.appName,
                 title: manual.title,
                 pid: manual.pid.map(Int.init),
             )
-        } else {
-            loop.currentMeeting.map { meeting in
-                MeetingInfo(
-                    app: meeting.pattern.appName,
-                    title: meeting.windowTitle,
-                    pid: Int(meeting.windowPID),
-                )
-            }
         }
 
         return TranscriberStatus(

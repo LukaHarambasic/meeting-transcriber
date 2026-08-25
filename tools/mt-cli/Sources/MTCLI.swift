@@ -9,23 +9,23 @@ struct MTCLI: AsyncParsableCommand {
         abstract: "Thin client for the Meeting Transcriber debug RPC server.",
         subcommands: [
             State.self, Healthz.self, Screenshot.self, UITree.self, UIPress.self,
-            OpenSettings.self, CloseSettings.self, ConfirmBrowserConsent.self,
+            OpenSettings.self, CloseSettings.self,
             SeedSpeaker.self, RenameSpeaker.self, DeleteSpeaker.self, MergeSpeakers.self,
-            WavVerdictCommand.self, Watch.self, Record.self,
+            WavVerdictCommand.self, Record.self,
         ],
     )
 }
 
-/// The verb set both `/v1` lifecycle resources accept.
+/// The verb set the `/v1/record` lifecycle resource accepts.
 ///
 /// `start`/`stop` are offered alongside `toggle` on purpose: a button press
 /// expresses a desired end state, and any external controller's view of the app
 /// is slightly stale. A blind toggle after a meeting already ended does exactly
 /// the wrong thing and stays inverted; the idempotent verbs converge instead.
 ///
-/// Shared by the two subcommands below. Not the wire contract — the server's
-/// `WatchAction` and `RecordAction` are, and those stay separate so a verb added
-/// to one resource does not silently appear on the other.
+/// Not the wire contract — the server's `RecordAction` is, kept separate so a
+/// verb added here does not silently appear on the wire without a matching
+/// server change.
 enum ControlAction: String, ExpressibleByArgument, CaseIterable {
     case status
     case start
@@ -33,70 +33,78 @@ enum ControlAction: String, ExpressibleByArgument, CaseIterable {
     case toggle
 }
 
-/// Read or change one `/v1` lifecycle resource, printing the resulting status.
+/// `mt-cli record [status|start|stop|toggle]` — a manual recording started
+/// from the shell instead of the menu bar (issue #633).
 ///
-/// Always prints the state *after* the call, so a caller can redraw from the
-/// response rather than racing a follow-up poll. A refusal surfaces as a thrown
-/// `RPCError.http` — non-zero exit with the JSON body in the message.
-private func runControl(resource: String, action: ControlAction) async throws {
-    let client = try RPCClient.loadDefault()
-    let data = action == .status
-        ? try await client.get(resource)
-        : try await client.post(
-            resource, json: ["action": action.rawValue],
-            timeout: RPCClient.controlTimeoutSeconds,
-        )
-    FileHandle.standardOutput.write(data)
-    FileHandle.standardOutput.write(Data("\n".utf8))
-}
-
-/// `mt-cli record [status|start|stop|toggle]` — the microphone counterpart to
-/// `mt-cli watch`, for a meeting happening in the room rather than in an app
-/// (issue #633).
-///
-/// What differs from watching is the refusals, and both are worth knowing before
-/// scripting against it. `409` means something else is being recorded and
-/// starting would clobber it. `412` means nothing would be captured: either "No
-/// Microphone (app audio only)" is set, or the microphone permission is denied
-/// or broken. A 412 will not clear on its own, so a retry loop should stop on
-/// it; the printed body says which of the two it was.
+/// `409` means something else is already being recorded and starting would
+/// clobber it. `412` means nothing would be captured: either "No Microphone
+/// (app audio only)" is set, or the microphone permission is denied or
+/// broken — that only applies to the microphone-shaped payload (no
+/// `--source`, or `--source mic`); an app/system source proceeds under it. A
+/// 412 will not clear on its own, so a retry loop should stop on it; the
+/// printed body says which of the two it was.
 struct Record: AsyncParsableCommand {
     /// The resource this command drives. Named rather than inlined at the call
-    /// site so a test can pin it: `Record` and `Watch` differ in this one
-    /// string, and getting it wrong starts the wrong thing without a compile
-    /// error.
+    /// site so a test can pin it against the wire path.
     static let resource = "/v1/record"
 
     static let configuration = CommandConfiguration(
-        abstract: "Read or change microphone recording. Prints the resulting status as JSON.",
+        abstract: "Read or change manual recording. Prints the resulting status as JSON.",
     )
 
     @Argument(help: "status (default), start, stop, or toggle.")
     var action: ControlAction = .status
 
+    @Option(name: .long, help: "What to capture on start: mic (default), app, or system.")
+    var source: RecordSource?
+
+    @Option(name: .long, help: "Target process id. Required when --source app.")
+    var pid: Int32?
+
+    @Option(name: .customLong("app-name"), help: "Display name for an app recording. Defaults to \"App\".")
+    var appName: String?
+
+    @Option(name: .long, help: "Meeting title for output-file naming. Defaults to the app name.")
+    var title: String?
+
     func run() async throws {
-        try await runControl(resource: Self.resource, action: action)
+        let client = try RPCClient.loadDefault()
+        let data = action == .status
+            ? try await client.get(Self.resource)
+            : try await client.post(
+                Self.resource,
+                json: Self.payload(action: action, source: source, pid: pid, appName: appName, title: title),
+                timeout: RPCClient.controlTimeoutSeconds,
+            )
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data("\n".utf8))
+    }
+
+    /// Build the `POST /v1/record` body. Pure so a test can pin the wire
+    /// shape without a running server — the key names (`source`, `pid`,
+    /// `appName`, `title`) must match the server's `RecordActionPayload`
+    /// decoder exactly, or a well-typed option silently no-ops instead of
+    /// failing to parse.
+    static func payload(
+        action: ControlAction, source: RecordSource?, pid: Int32?, appName: String?, title: String?,
+    ) -> [String: Any] {
+        var payload: [String: Any] = ["action": action.rawValue]
+        if let source { payload["source"] = source.rawValue }
+        if let pid { payload["pid"] = pid }
+        if let appName { payload["appName"] = appName }
+        if let title { payload["title"] = title }
+        return payload
     }
 }
 
-/// `mt-cli watch [status|start|stop|toggle]` — the scriptable surface behind a
-/// hotkey, a Shortcut or a Stream Deck key.
-///
-/// A refusal here is `409`: a manual recording owns the loop.
-struct Watch: AsyncParsableCommand {
-    /// See `Record.resource`.
-    static let resource = "/v1/watch"
-
-    static let configuration = CommandConfiguration(
-        abstract: "Read or change meeting watching. Prints the resulting status as JSON.",
-    )
-
-    @Argument(help: "status (default), start, stop, or toggle.")
-    var action: ControlAction = .status
-
-    func run() async throws {
-        try await runControl(resource: Self.resource, action: action)
-    }
+/// What a `--source` option asks `Record` to capture. Raw values are the
+/// wire values the server's `RecordSource` decodes (`RecordStatusDTO.swift`):
+/// absent/`mic` for the microphone, `app` for a specific process, `system`
+/// for the whole system output ("Record Meeting").
+enum RecordSource: String, ExpressibleByArgument, CaseIterable {
+    case mic
+    case app
+    case system
 }
 
 struct State: AsyncParsableCommand {
@@ -147,25 +155,6 @@ struct CloseSettings: AsyncParsableCommand {
         let client = try RPCClient.loadDefault()
         let data = try await client.post("/action/closeSettings", json: [:])
         FileHandle.standardOutput.write(data)
-    }
-}
-
-struct ConfirmBrowserConsent: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "confirm-browser-consent",
-        abstract: "Answer a parked browser-meeting consent prompt (issue #503). "
-            + "Prints the server's {\"resolved\":bool} JSON; resolved:false means "
-            + "no prompt was waiting yet, so poll until true.",
-    )
-
-    @Flag(inversion: .prefixedNo, help: "Grant recording (default) or --no-granted to decline.")
-    var granted = true
-
-    func run() async throws {
-        let client = try RPCClient.loadDefault()
-        let data = try await client.post("/action/confirmBrowserConsent", json: ["granted": granted])
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data("\n".utf8))
     }
 }
 

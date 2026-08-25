@@ -157,8 +157,7 @@ final class ChannelHealthController {
         /// E2E hook: force the red-tint flags at launch so a driver script can
         /// assert the menu-bar pipeline end-to-end without orchestrating real
         /// audio. Keeps the flags `private(set)` for normal operation — only
-        /// `AppState.init`'s env-var path calls this. See that call site for the
-        /// `MEETINGTRANSCRIBER_DEBUG_SUPPRESS_AUTOWATCH` interaction.
+        /// `AppState.init`'s env-var path calls this.
         func applyForcedFlagsForE2E(micSilent: Bool, appSilent: Bool, recordingSilent: Bool) {
             micSilentActive = micSilent
             appSilentActive = appSilent

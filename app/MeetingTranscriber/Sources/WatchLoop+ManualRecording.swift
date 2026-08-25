@@ -6,9 +6,9 @@ private let logger = Logger(subsystem: AppPaths.logSubsystem, category: "WatchLo
 /// The poll loop that decides when a manually started recording ends, split out
 /// of `WatchLoop.swift` to keep that file under the line cap.
 ///
-/// Only the monitor moved. The start and stop paths mutate `activeRecorder`,
-/// `manualRecordingTask` and `watchTask`, all of which are private to the class
-/// on purpose, and moving them here would mean widening those to internal for a
+/// Only the monitor moved. The start and stop paths mutate `activeRecorder`
+/// and `manualRecordingTask`, both of which are private to the class on
+/// purpose, and moving them here would mean widening those to internal for a
 /// line count. The monitor reads nothing but injected dependencies.
 extension WatchLoop {
     func monitorManualRecording(pid: pid_t?) async {

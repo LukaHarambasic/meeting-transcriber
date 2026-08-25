@@ -19,7 +19,6 @@ struct TranscriberStatus: Codable {
 
 enum TranscriberState: String, Codable {
     case idle
-    case watching
     case recording
     case transcribing
     case generatingProtocol = "generating_protocol"
@@ -32,7 +31,6 @@ enum TranscriberState: String, Codable {
     var label: String {
         switch self {
         case .idle: "Idle"
-        case .watching: "Watching for Meetings..."
         case .recording: "Recording"
         case .transcribing: "Transcribing..."
         case .generatingProtocol: "Generating Protocol..."
@@ -47,7 +45,6 @@ enum TranscriberState: String, Codable {
     var icon: String {
         switch self {
         case .idle: "waveform.circle"
-        case .watching: "eye.fill"
         case .recording: "record.circle.fill"
         case .transcribing: "waveform"
         case .generatingProtocol: "waveform"

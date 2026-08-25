@@ -2,7 +2,6 @@ import Combine
 import SwiftUI
 
 extension Notification.Name {
-    static let autoWatchStart = Notification.Name("autoWatchStart")
     static let showSpeakerNaming = Notification.Name("showSpeakerNaming")
     static let showSettings = Notification.Name("showSettings")
     static let closeSettings = Notification.Name("closeSettings")
@@ -84,29 +83,14 @@ struct MeetingTranscriberApp: App {
         // (`PipelineController.makeQueue`): a crashed `_app_raw.tmp` must be
         // re-mixed by `recoverCrashedRecordings` BEFORE it's cleaned up, so the
         // delete can no longer run first here (issue #379).
-        let suppressAutoWatch = ProcessInfo.processInfo.environment["MEETINGTRANSCRIBER_DEBUG_SUPPRESS_AUTOWATCH"] == "1"
-        // Auto-watch: schedule on main run loop after app finishes launching.
-        // E2E drivers that force channel-health flags via env var also set
-        // `MEETINGTRANSCRIBER_DEBUG_SUPPRESS_AUTOWATCH=1` so a +3 s
-        // `toggleWatching` doesn't reset the forced flag through the
-        // normal `channelHealth.stop()` path.
-        if (CommandLine.arguments.contains("--auto-watch")
-            || UserDefaults.standard.bool(forKey: "autoWatch"))
-            && !suppressAutoWatch {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                NotificationCenter.default.post(name: .autoWatchStart, object: nil)
-            }
-        }
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(
                 status: appState.currentStatus,
-                isWatching: appState.isWatching,
                 pipelineQueue: appState.pipelineQueue,
                 updateChecker: appState.updateChecker,
-                onStartStop: { appState.watching.toggleWatching() },
                 onRecordMeeting: { appState.watching.startMeetingRecording() },
                 onRecordApp: { bringWindowToFront(id: "record-app") },
                 onRecordMicrophone: { appState.watching.startMicrophoneRecording() },
@@ -142,11 +126,6 @@ struct MeetingTranscriberApp: App {
                     micSilentOverlay: appState.micSilentOverlay,
                     appSilentOverlay: appState.appSilentOverlay,
                 )
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .autoWatchStart)) { _ in
-                if !appState.isWatching {
-                    appState.watching.toggleWatching(userInitiated: false)
-                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .showSpeakerNaming)) { _ in
                 bringWindowToFront(id: "speaker-naming")
@@ -215,7 +194,6 @@ struct MeetingTranscriberApp: App {
                 whisperKitEngine: appState.engines.whisperKit,
                 parakeetEngine: appState.engines.parakeetEngine,
                 updateChecker: appState.updateChecker,
-                notificationVisibility: appState.permissions.notificationVisibility,
                 // Share the pipeline's actor instance so both writers serialise on
                 // the same `recognition_log.jsonl` file. Fallback only fires in the
                 // test-only PipelineQueue init that intentionally leaves it nil.
@@ -366,14 +344,6 @@ struct MeetingTranscriberApp: App {
     }
 
     // MARK: - Pure Helpers (testable without @main)
-
-    /// Whether auto-watch should be enabled based on CLI flags or user settings.
-    static func shouldAutoWatch(
-        commandLineArgs: [String] = CommandLine.arguments,
-        autoWatchSetting: Bool = UserDefaults.standard.bool(forKey: "autoWatch"),
-    ) -> Bool {
-        commandLineArgs.contains("--auto-watch") || autoWatchSetting
-    }
 
     /// Returns the protocol path from the last completed job, if any.
     static func lastCompletedProtocolPath(completedJobs: [PipelineJob]) -> URL? {
