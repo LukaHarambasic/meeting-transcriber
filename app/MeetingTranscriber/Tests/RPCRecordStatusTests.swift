@@ -63,7 +63,10 @@
 
             XCTAssertEqual(
                 Set(object.keys),
-                ["recording", "startPending", "badge", "otherRecordingActive", "noMic", "microphoneHealthy"],
+                [
+                    "recording", "startPending", "badge", "otherRecordingActive", "noMic",
+                    "microphoneHealthy", "screenRecordingHealthy",
+                ],
                 "these key names are the published contract",
             )
             XCTAssertNil(object["state"], "a nil value is omitted, not sent as null")
