@@ -1,5 +1,4 @@
 @testable import MeetingTranscriber
-import UserNotifications
 import XCTest
 
 final class NotificationManagerTests: XCTestCase {
@@ -168,11 +167,11 @@ final class NotificationManagerTests: XCTestCase {
     }
 
     func testNotificationContentReturnsNilForSilentStates() {
-        // .idle / .watching / .transcribing / .generatingProtocol /
+        // .idle / .transcribing / .generatingProtocol /
         // .waitingForSpeakerCount / .recordingDone all fall into the
         // `default` branch — no notification.
         for state: TranscriberState in [
-            .idle, .watching, .transcribing, .generatingProtocol,
+            .idle, .transcribing, .generatingProtocol,
             .waitingForSpeakerCount, .recordingDone,
         ] {
             XCTAssertNil(
@@ -183,74 +182,6 @@ final class NotificationManagerTests: XCTestCase {
                 "Expected no notification for state \(state)",
             )
         }
-    }
-
-    // MARK: - Browser consent prompt (issue #503)
-
-    func testConsentGrantedOnlyForRecordAction() {
-        XCTAssertEqual(NotificationManager.consentAnswer(for: NotificationManager.recordActionID), .granted)
-    }
-
-    func testNeverActionIsItsOwnAnswerNotADecline() {
-        // The distinction the deny list rests on: a decline is about this call
-        // and expires with the cooldown, Never is about the app and does not.
-        // Mapping Never onto .declined would re-prompt ten minutes later.
-        XCTAssertEqual(NotificationManager.consentAnswer(for: NotificationManager.neverActionID), .never)
-        XCTAssertFalse(ConsentAnswer.never.isGranted)
-    }
-
-    func testConsentDeclinedForIgnoreDismissAndDefault() {
-        XCTAssertEqual(NotificationManager.consentAnswer(for: NotificationManager.ignoreActionID), .declined)
-        XCTAssertEqual(NotificationManager.consentAnswer(for: UNNotificationDismissActionIdentifier), .declined)
-        XCTAssertEqual(NotificationManager.consentAnswer(for: UNNotificationDefaultActionIdentifier), .declined)
-        XCTAssertEqual(NotificationManager.consentAnswer(for: "something-else"), .declined)
-    }
-
-    func testConsentCategoryHasRecordIgnoreAndNeverActions() {
-        let category = NotificationManager.makeConsentCategory()
-        XCTAssertEqual(category.identifier, NotificationManager.consentCategoryID)
-        XCTAssertEqual(
-            category.actions.map(\.identifier),
-            [
-                NotificationManager.recordActionID,
-                NotificationManager.ignoreActionID,
-                NotificationManager.neverActionID,
-            ],
-        )
-        XCTAssertEqual(category.actions.map(\.title), ["Record", "Ignore", "Never for this app"])
-    }
-
-    /// Neither action may carry `.foreground`. The delegate callback fires
-    /// either way, so the flag buys nothing and costs the user their meeting
-    /// window: tapping Record activates the app, pulling focus away from the
-    /// call they just consented to keep having. On a machine with several
-    /// bundles registered for the same identifier it is worse than useless,
-    /// because LaunchServices activates whichever copy it considers canonical
-    /// rather than the running one.
-    func testConsentActionsDoNotActivateTheApp() {
-        let category = NotificationManager.makeConsentCategory()
-        for action in category.actions {
-            XCTAssertFalse(
-                action.options.contains(.foreground),
-                "\(action.identifier) must not steal focus from the meeting",
-            )
-        }
-    }
-
-    func testAskToRecordDeclinesWhenNotSetUp() async {
-        // No app bundle / setUp never ran → we can't show a prompt, so default
-        // to "don't record" rather than recording without asking.
-        let manager = NotificationManager()
-        let answer = await manager.askToRecord(title: "Browser meeting", body: "Record?")
-        XCTAssertEqual(answer, .declined)
-    }
-
-    func testDefaultNotifierDeniesConsent() async {
-        // The AppNotifying default (a notifier with no real prompt, e.g.
-        // SilentNotifier) denies consent, so a browser meeting never records
-        // without a visible prompt.
-        let answer = await SilentNotifier().askToRecord(title: "Browser meeting", body: "Record?")
-        XCTAssertEqual(answer, .declined)
     }
 
     // MARK: - Helpers

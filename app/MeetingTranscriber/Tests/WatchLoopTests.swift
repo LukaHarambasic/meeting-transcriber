@@ -3,119 +3,26 @@ import XCTest
 
 @MainActor
 final class WatchLoopTests: XCTestCase {
-    private func makeLoop(pipelineQueue: PipelineQueue? = nil) -> WatchLoop {
-        let detector = PowerAssertionDetector()
-        detector.assertionProvider = { [:] }
-        return WatchLoop(
-            detector: detector,
-            pipelineQueue: pipelineQueue,
-        )
-    }
+    // MARK: - Stop Without Anything Active
 
-    // MARK: - Initial State
-
-    func testInitialState() {
-        let loop = makeLoop()
-        XCTAssertEqual(loop.state, .idle)
-        XCTAssertFalse(loop.isActive)
-        XCTAssertNil(loop.currentMeeting)
-        XCTAssertNil(loop.lastError)
-    }
-
-    // MARK: - Start / Stop
-
-    func testStartTransitionsToWatching() {
-        let loop = makeLoop()
-        loop.start()
-        XCTAssertEqual(loop.state, .watching)
-        XCTAssertTrue(loop.isActive)
-        loop.stop()
-    }
-
-    func testStopTransitionsToIdle() {
-        let loop = makeLoop()
-        loop.start()
-        loop.stop()
-        XCTAssertEqual(loop.state, .idle)
-        XCTAssertFalse(loop.isActive)
-    }
-
-    func testDoubleStartIsNoOp() {
-        let loop = makeLoop()
-        loop.start()
-        loop.start() // should not crash or create second task
-        XCTAssertEqual(loop.state, .watching)
-        loop.stop()
-    }
-
-    func testStopWithoutStartIsNoOp() {
-        let loop = makeLoop()
+    func testStopWithoutAnyRecordingIsNoOp() {
+        let loop = WatchLoop()
         loop.stop() // should not crash
         XCTAssertEqual(loop.state, .idle)
     }
 
-    // MARK: - State Change Callback
-
-    func testOnStateChangeCallback() {
-        let loop = makeLoop()
-        var transitions: [(WatchLoop.State, WatchLoop.State)] = []
-        loop.onStateChange = { old, new in
-            transitions.append((old, new))
-        }
-
-        loop.start()
-        XCTAssertEqual(transitions.count, 1)
-        XCTAssertEqual(transitions[0].0, .idle)
-        XCTAssertEqual(transitions[0].1, .watching)
-
-        loop.stop()
-        XCTAssertEqual(transitions.count, 2)
-        XCTAssertEqual(transitions[1].0, .watching)
-        XCTAssertEqual(transitions[1].1, .idle)
-    }
-
-    // MARK: - Clean Title
-
-    func testCleanTitleTeams() {
-        XCTAssertEqual(
-            WatchLoop.cleanTitle("Daily Standup | Microsoft Teams"),
-            "Daily Standup",
-        )
-    }
-
-    func testCleanTitleZoom() {
-        XCTAssertEqual(
-            WatchLoop.cleanTitle("Project Review - Zoom"),
-            "Project Review",
-        )
-    }
-
-    func testCleanTitleWebex() {
-        XCTAssertEqual(
-            WatchLoop.cleanTitle("Sprint Planning - Webex"),
-            "Sprint Planning",
-        )
-    }
-
-    func testCleanTitleNoSuffix() {
-        XCTAssertEqual(
-            WatchLoop.cleanTitle("Just a Meeting"),
-            "Just a Meeting",
-        )
-    }
-
     // MARK: - Transcriber State Mapping
 
-    func testTranscriberStateMapping() {
-        let loop = makeLoop()
+    func testTranscriberStateMapping() async throws {
+        let (loop, _) = makeTestWatchLoop()
 
-        // idle
         XCTAssertEqual(loop.transcriberState, .idle)
 
-        // watching
-        loop.start()
-        XCTAssertEqual(loop.transcriberState, .watching)
+        try await loop.startManualRecording(pid: 42, appName: "Chrome", title: "Meeting")
+        XCTAssertEqual(loop.transcriberState, .recording)
+
         loop.stop()
+        XCTAssertEqual(loop.transcriberState, .idle)
     }
 
     // MARK: - Default Output Dir
@@ -125,51 +32,23 @@ final class WatchLoopTests: XCTestCase {
         XCTAssertTrue(dir.path.contains("Downloads/MeetingTranscriber"))
     }
 
-    // MARK: - Meeting End Detection
-
-    // Grace-period / max-duration / grace-reset tests live in
-    // WatchLoopTimingTests.swift — they use TestClock and are async.
-
     // MARK: - NoMic Configuration
 
     func testNoMicDefault() {
-        let loop = makeLoop()
+        let loop = WatchLoop()
         XCTAssertFalse(loop.noMic)
     }
 
     // MARK: - PipelineQueue Configuration
 
     func testPipelineQueueDefault() {
-        let loop = makeLoop()
+        let loop = WatchLoop()
         XCTAssertNil(loop.pipelineQueue)
     }
 
     func testPipelineQueueInit() {
         let queue = PipelineQueue()
-        let loop = makeLoop(pipelineQueue: queue)
-        XCTAssertNotNil(loop.pipelineQueue)
-    }
-
-    // MARK: - Cancellation
-
-    func testStopDuringWatchingCleansUp() {
-        let loop = makeLoop()
-        loop.start()
-        XCTAssertEqual(loop.state, .watching)
-
-        loop.stop()
-        XCTAssertEqual(loop.state, .idle)
-        XCTAssertFalse(loop.isActive)
-    }
-
-    // MARK: - Pipeline Queue Wiring
-
-    func testPipelineQueuePassedToConstructor() {
-        let queue = PipelineQueue()
-        let loop = WatchLoop(
-            detector: PowerAssertionDetector(),
-            pipelineQueue: queue,
-        )
+        let loop = WatchLoop(pipelineQueue: queue)
         XCTAssertNotNil(loop.pipelineQueue)
     }
 
@@ -217,23 +96,6 @@ final class WatchLoopTests: XCTestCase {
 
         XCTAssertFalse(loop.isManualRecording)
         XCTAssertEqual(loop.state, .idle)
-    }
-
-    // MARK: - Clean Title Edge Cases
-
-    func testCleanTitleNoMatchReturnsOriginal() {
-        XCTAssertEqual(
-            WatchLoop.cleanTitle("Some Random Window"),
-            "Some Random Window",
-        )
-    }
-
-    func testCleanTitleMultiplePipes() {
-        // Only the last pipe-separated suffix should be removed for Teams
-        XCTAssertEqual(
-            WatchLoop.cleanTitle("Channel | Meeting | Microsoft Teams"),
-            "Channel | Meeting",
-        )
     }
 
     // MARK: - Stop Manual Recording Enqueues Job
@@ -291,45 +153,6 @@ final class WatchLoopTests: XCTestCase {
             } else {
                 XCTFail("Expected permissionDenied, got \(error)")
             }
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
-
-    func testManualRecordingStartsWhenOnlyAccessibilityDenied() async throws {
-        let (loop, recorder) = makeTestWatchLoop()
-        loop.permissionChecker = {
-            HealthCheckResult(screenRecording: .healthy, microphone: .healthy, accessibility: .denied)
-        }
-
-        // Accessibility feeds participant reading and mute detection, neither of
-        // which this path uses, and Settings presents it as optional. Refusing
-        // over it left the app recording an auto-detected meeting while turning
-        // down the one the user asked for by hand.
-        try await loop.startManualRecording(pid: 123, appName: "Test", title: "Test")
-
-        XCTAssertTrue(recorder.startCalled)
-        XCTAssertTrue(loop.isManualRecording)
-    }
-
-    func testManualRecordingRefusalNamesOnlyBlockingPermissions() async {
-        let (loop, _) = makeTestWatchLoop()
-        loop.permissionChecker = {
-            HealthCheckResult(screenRecording: .healthy, microphone: .broken, accessibility: .denied)
-        }
-
-        do {
-            try await loop.startManualRecording(pid: 123, appName: "Test", title: "Test")
-            XCTFail("Expected permissionDenied error")
-        } catch let error as RecorderError {
-            guard case let .permissionDenied(reason) = error else {
-                XCTFail("Expected permissionDenied, got \(error)")
-                return
-            }
-            XCTAssertTrue(reason.contains("Microphone"))
-            // Naming a permission that had nothing to do with the refusal sends
-            // the user to the wrong pane in System Settings.
-            XCTAssertFalse(reason.contains("Accessibility"))
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

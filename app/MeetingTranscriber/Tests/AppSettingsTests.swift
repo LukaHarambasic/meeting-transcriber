@@ -49,12 +49,7 @@ final class AppSettingsTests: XCTestCase {
     // MARK: - Defaults
 
     func testDefaultValues() {
-        XCTAssertEqual(settings.pollInterval, 3.0)
-        XCTAssertEqual(settings.endGrace, 15.0)
         XCTAssertEqual(settings.numSpeakers, 0)
-        XCTAssertTrue(settings.watchTeams)
-        XCTAssertTrue(settings.watchZoom)
-        XCTAssertTrue(settings.watchWebex)
         XCTAssertFalse(settings.noMic)
         XCTAssertEqual(settings.micName, "Me")
         XCTAssertTrue(settings.diarize)
@@ -79,36 +74,6 @@ final class AppSettingsTests: XCTestCase {
     }
 
     // MARK: - Clamping
-
-    func testPollIntervalClampedToMinimum() {
-        settings.pollInterval = 0.1
-        XCTAssertEqual(settings.pollInterval, 1.0)
-    }
-
-    func testPollIntervalAcceptsValidValue() {
-        settings.pollInterval = 5.0
-        XCTAssertEqual(settings.pollInterval, 5.0)
-    }
-
-    func testPollIntervalBoundaryValue() {
-        settings.pollInterval = 1.0
-        XCTAssertEqual(settings.pollInterval, 1.0)
-    }
-
-    func testEndGraceClampedToMinimum() {
-        settings.endGrace = 0.5
-        XCTAssertEqual(settings.endGrace, 1.0)
-    }
-
-    func testEndGraceAcceptsValidValue() {
-        settings.endGrace = 30.0
-        XCTAssertEqual(settings.endGrace, 30.0)
-    }
-
-    func testEndGraceBoundaryValue() {
-        settings.endGrace = 5.0
-        XCTAssertEqual(settings.endGrace, 5.0)
-    }
 
     func testNumSpeakersClampedToMinimum() {
         settings.numSpeakers = -1
@@ -138,18 +103,6 @@ final class AppSettingsTests: XCTestCase {
     func testNumSpeakersAcceptsValidValue() {
         settings.numSpeakers = 5
         XCTAssertEqual(settings.numSpeakers, 5)
-    }
-
-    // MARK: - UserDefaults persistence
-
-    func testPollIntervalSavedToDefaults() {
-        settings.pollInterval = 7.0
-        XCTAssertEqual(defaults.double(forKey: "pollInterval"), 7.0)
-    }
-
-    func testClampedValueSavedToDefaults() {
-        settings.pollInterval = 0.5
-        XCTAssertEqual(defaults.double(forKey: "pollInterval"), 1.0)
     }
 
     // MARK: - Output Directory (issue #626)
@@ -246,48 +199,6 @@ final class AppSettingsTests: XCTestCase {
 
         reloaded.clearCustomOutputDir()
         XCTAssertNil(defaults.data(forKey: "customOutputDirBookmark"))
-    }
-
-    // MARK: - watchApps
-
-    func testWatchAppsAllEnabled() {
-        XCTAssertEqual(settings.watchApps, ["Microsoft Teams", "Zoom", "Webex"])
-    }
-
-    func testWatchAppsSingleDisabled() {
-        settings.watchZoom = false
-        XCTAssertEqual(settings.watchApps, ["Microsoft Teams", "Webex"])
-    }
-
-    func testWatchAppsAllDisabled() {
-        settings.watchTeams = false
-        settings.watchZoom = false
-        settings.watchWebex = false
-        XCTAssertEqual(settings.watchApps, [])
-    }
-
-    // MARK: - watchBrowserMeetings (issue #503)
-
-    func testWatchBrowserMeetingsDefaultsOff() {
-        XCTAssertFalse(settings.watchBrowserMeetings)
-        XCTAssertFalse(
-            settings.watchApps.contains("Google Chrome"),
-            "browser watching is opt-in, so Chrome must not be watched by default",
-        )
-    }
-
-    func testWatchBrowserMeetingsAppendsTheBrowserCategoryToWatchApps() {
-        // The appended token is the browser *category*, deliberately a name no
-        // real process carries: individual browsers are identified per process
-        // at detection time, so this one token switches the whole family on.
-        settings.watchBrowserMeetings = true
-        XCTAssertEqual(settings.watchApps, ["Microsoft Teams", "Zoom", "Webex", "Browser Meetings"])
-    }
-
-    func testWatchBrowserMeetingsPersists() {
-        settings.watchBrowserMeetings = true
-        let fresh = AppSettings(defaults: defaults)
-        XCTAssertTrue(fresh.watchBrowserMeetings)
     }
 
     // MARK: - Claude CLI

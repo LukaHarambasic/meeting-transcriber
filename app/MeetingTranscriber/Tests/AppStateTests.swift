@@ -60,11 +60,6 @@ final class AppStateTests: XCTestCase { // swiftlint:disable:this type_body_leng
 
     // MARK: - Default State
 
-    func testIsWatchingFalseWhenNoWatchLoop() {
-        let (state, _) = makeState()
-        XCTAssertFalse(state.isWatching)
-    }
-
     func testCurrentStateLabelIdleByDefault() {
         let (state, _) = makeState()
         XCTAssertEqual(state.currentStateLabel, "Idle")
@@ -80,44 +75,7 @@ final class AppStateTests: XCTestCase { // swiftlint:disable:this type_body_leng
         XCTAssertNil(state.currentStatus)
     }
 
-    // MARK: - isWatching
-
-    func testIsWatchingTrueWhenLoopActiveNotManual() {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        loop.start()
-        defer { loop.stop() }
-        XCTAssertTrue(state.isWatching)
-    }
-
-    func testIsWatchingFalseWhenLoopNotStarted() {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        // loop not started → isActive == false
-        XCTAssertFalse(state.isWatching)
-    }
-
-    func testIsWatchingFalseWhenManualRecording() async throws {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        try await loop.startManualRecording(pid: 1234, appName: "Chrome", title: "Meeting")
-        defer { loop.stop() }
-        XCTAssertFalse(state.isWatching)
-    }
-
     // MARK: - currentStateLabel
-
-    func testCurrentStateLabelWatchingWhenLoopActive() {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        loop.start()
-        defer { loop.stop() }
-        XCTAssertEqual(state.currentStateLabel, "Watching for Meetings...")
-    }
 
     func testCurrentStateLabelRecordingWhenManualRecording() async throws {
         let (state, _) = makeState()
@@ -128,11 +86,14 @@ final class AppStateTests: XCTestCase { // swiftlint:disable:this type_body_leng
         XCTAssertEqual(state.currentStateLabel, "Recording")
     }
 
-    func testCurrentStateLabelIdleWhenLoopStopped() {
+    /// Reached only via an explicit manual/mic/meeting recording now (no more
+    /// auto-detect poll loop) — starting one, then stopping and clearing the
+    /// loop, must still fall back to "Idle".
+    func testCurrentStateLabelIdleWhenLoopStopped() async throws {
         let (state, _) = makeState()
         let (loop, _) = makeTestWatchLoop()
         state.watching.watchLoop = loop
-        loop.start()
+        try await loop.startManualRecording(pid: 1, appName: "Chrome", title: "Meeting")
         loop.stop()
         state.watching.watchLoop = nil
         XCTAssertEqual(state.currentStateLabel, "Idle")
@@ -147,40 +108,13 @@ final class AppStateTests: XCTestCase { // swiftlint:disable:this type_body_leng
         XCTAssertNil(state.currentStatus)
     }
 
-    func testCurrentStatusNotNilWhenLoopActive() {
+    func testCurrentStatusNotNilWhenLoopActive() async throws {
         let (state, _) = makeState()
         let (loop, _) = makeTestWatchLoop()
         state.watching.watchLoop = loop
-        loop.start()
+        try await loop.startManualRecording(pid: 1, appName: "Chrome", title: "Meeting")
         defer { loop.stop() }
         XCTAssertNotNil(state.currentStatus)
-    }
-
-    func testCurrentStatusStateMatchesLoopTranscriberState() {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        loop.start()
-        defer { loop.stop() }
-        XCTAssertEqual(state.currentStatus?.state, .watching)
-    }
-
-    func testCurrentStatusDetailMatchesLoopDetail() {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        loop.start()
-        defer { loop.stop() }
-        XCTAssertEqual(state.currentStatus?.detail, "Polling for meetings...")
-    }
-
-    func testCurrentStatusMeetingNilWhenNoActiveMeeting() {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        loop.start()
-        defer { loop.stop() }
-        XCTAssertNil(state.currentStatus?.meeting)
     }
 
     func testCurrentStatusMeetingFromManualRecordingInfo() async throws {
@@ -217,64 +151,6 @@ final class AppStateTests: XCTestCase { // swiftlint:disable:this type_body_leng
         try await loop.startManualRecording(pid: 42, appName: "Chrome", title: "Meeting")
         defer { loop.stop() }
         XCTAssertEqual(state.currentBadge, .recording)
-    }
-
-    // MARK: - toggleWatching: stop path
-
-    func testToggleWatchingStopsActiveLoop() {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        loop.start()
-        state.watching.watchLoop = loop
-        XCTAssertTrue(state.isWatching)
-
-        state.watching.toggleWatching()
-
-        XCTAssertNil(state.watching.watchLoop)
-        XCTAssertFalse(state.isWatching)
-    }
-
-    func testToggleWatchingWhileManualRecordingIsNoOp() async throws {
-        let (state, _) = makeState()
-        let (loop, _) = makeTestWatchLoop()
-        state.watching.watchLoop = loop
-        try await loop.startManualRecording(pid: 1234, appName: "Chrome", title: "Meeting")
-        defer { loop.stop() }
-
-        state.watching.toggleWatching() // must be a no-op
-
-        XCTAssertNotNil(state.watching.watchLoop)
-        XCTAssertEqual(state.watching.watchLoop?.isManualRecording, true)
-    }
-
-    // MARK: - toggleWatching: start path (async)
-
-    // toggleWatching() spawns a Task { @MainActor }. We yield once to let it run.
-    // In CI, Permissions.ensureMicrophoneAccess() returns false immediately (no bundle),
-    // but toggleWatching() ignores the return value so WatchLoop is always created.
-
-    func testToggleWatchingCreatesWatchLoop() async {
-        let (state, _) = makeState()
-        addTeardownBlock { state.watching.watchLoop?.stop() }
-
-        // `AppState.init` does not expose the permission seams, so this is the
-        // one path that reaches the production defaults. Auto-watch exercises
-        // the same start without the optional Accessibility prompt, which would
-        // otherwise be a real TCC call from a unit test.
-        state.watching.toggleWatching(userInitiated: false)
-        await waitFor(state.watching.watchLoop != nil)
-
-        XCTAssertNotNil(state.watching.watchLoop)
-    }
-
-    func testToggleWatchingMakesLoopActive() async {
-        let (state, _) = makeState()
-        addTeardownBlock { state.watching.watchLoop?.stop() }
-
-        state.watching.toggleWatching(userInitiated: false)
-        await waitFor(state.watching.watchLoop?.isActive == true)
-
-        XCTAssertEqual(state.watching.watchLoop?.isActive, true)
     }
 
     // MARK: - stopManualRecording
@@ -477,27 +353,6 @@ final class AppStateTests: XCTestCase { // swiftlint:disable:this type_body_leng
             let txBody = Data(#"{"path":"\#(txFile.path)","maxWaitSeconds":0}"#.utf8)
             let tx = try await send("POST", "v1/transcribe", body: txBody)
             XCTAssertEqual(tx, 202)
-
-            // watch closures: the route tests stub these, and `DebugRPCServer.init`
-            // declares defaults for both, so deleting the wiring arguments at the
-            // `AppState` call site still compiles and leaves those tests green.
-            // Driving the real closures over the socket is what pins them.
-            let watchGet = try await send("GET", "v1/watch")
-            XCTAssertEqual(watchGet, 200)
-            let watchBad = try await send("POST", "v1/watch", body: Data(#"{"action":"nope"}"#.utf8))
-            XCTAssertEqual(watchBad, 400, "an unknown verb must not reach the controller")
-
-            // `stop` while not watching is a satisfied request, and reaching
-            // `.unchanged` proves the control closure ran rather than a default.
-            var stopReq = URLRequest(url: baseURL.appendingPathComponent("v1/watch"))
-            stopReq.httpMethod = "POST"
-            stopReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            let stopBody = Data(#"{"action":"stop"}"#.utf8)
-            let (stopData, stopResp) = try await URLSession.shared.upload(for: stopReq, from: stopBody)
-            XCTAssertEqual(code(stopResp), 200)
-            let dto = try JSONDecoder().decode(WatchStatusDTO.self, from: stopData)
-            XCTAssertFalse(dto.watching)
-            XCTAssertFalse(dto.manualRecording)
         }
 
         /// The `/v1/record` half of the same job, in its own test because the one

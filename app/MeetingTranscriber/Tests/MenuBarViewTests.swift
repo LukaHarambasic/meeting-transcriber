@@ -31,26 +31,18 @@ final class MenuBarViewTests: XCTestCase {
 
     private func makeView(
         status: TranscriberStatus? = nil,
-        isWatching: Bool = false,
         pipelineQueue: PipelineQueue? = nil,
         updateChecker: UpdateChecker? = nil,
         onNameSpeakers: (() -> Void)? = nil,
         onStopManualRecording: (() -> Void)? = nil,
         onRecordMeeting: @escaping () -> Void = {},
-        onRecordMicrophone: @escaping () -> Void = {},
-        noMic: Bool = false,
         manualRecordingPendingOrActive: Bool = false,
     ) -> MenuBarView {
         MenuBarView(
             status: status,
-            isWatching: isWatching,
             pipelineQueue: pipelineQueue ?? PipelineQueue(),
             updateChecker: updateChecker,
-            onStartStop: {},
             onRecordMeeting: onRecordMeeting,
-            onRecordApp: {},
-            onRecordMicrophone: onRecordMicrophone,
-            noMic: noMic,
             manualRecordingPendingOrActive: manualRecordingPendingOrActive,
             onStopManualRecording: onStopManualRecording,
             onOpenLastProtocol: {},
@@ -62,20 +54,6 @@ final class MenuBarViewTests: XCTestCase {
             onDismissJob: { _ in },
             onQuit: {},
         )
-    }
-
-    // MARK: - Start/Stop button
-
-    func testIdleShowsStartWatching() throws {
-        let sut = makeView(status: makeStatus(state: .idle), isWatching: false)
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Start Watching"))
-    }
-
-    func testWatchingShowsStopWatching() throws {
-        let sut = makeView(status: makeStatus(state: .watching), isWatching: true)
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Stop Watching"))
     }
 
     // MARK: - Meeting info
@@ -125,13 +103,13 @@ final class MenuBarViewTests: XCTestCase {
     // MARK: - Detail text
 
     func testDetailShownWhenNonEmpty() throws {
-        let sut = makeView(status: makeStatus(state: .watching, detail: "Checking Teams..."))
+        let sut = makeView(status: makeStatus(state: .recording, detail: "Checking Teams..."))
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Checking Teams..."))
     }
 
     func testDetailHiddenWhenEmpty() throws {
-        let sut = makeView(status: makeStatus(state: .watching, detail: ""))
+        let sut = makeView(status: makeStatus(state: .recording, detail: ""))
         let body = try sut.inspect()
         XCTAssertThrowsError(try body.find(text: "Checking Teams..."))
     }
@@ -170,126 +148,39 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertNoThrow(try body.find(text: "Quit"))
     }
 
-    // MARK: - Record Meeting
+    // MARK: - Record button
 
-    func testRecordMeetingButtonShownWhenIdle() throws {
+    func testRecordButtonShownWhenIdle() throws {
         let sut = makeView(status: makeStatus(state: .idle))
         let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(button: "Record Meeting"))
+        XCTAssertNoThrow(try body.find(button: "Record"))
     }
 
-    func testRecordMeetingButtonCallsCallback() throws {
+    func testRecordButtonCallsCallback() throws {
         var called = false
         // swiftlint:disable:next trailing_closure
         let sut = makeView(status: makeStatus(state: .idle), onRecordMeeting: { called = true })
 
-        try sut.inspect().find(button: "Record Meeting").tap()
+        try sut.inspect().find(button: "Record").tap()
 
         XCTAssertTrue(called)
     }
 
-    func testRecordMeetingButtonHiddenWhileRecording() throws {
+    func testRecordButtonHiddenWhileRecording() throws {
         let sut = makeView(status: makeStatus(state: .recording))
         let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(button: "Record Meeting"))
-    }
-
-    // MARK: - Record Microphone (issue #633)
-
-    func testRecordMicrophoneButtonShownWhenIdle() throws {
-        let sut = makeView(status: makeStatus(state: .idle))
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(button: "Record Microphone"))
-    }
-
-    func testRecordMicrophoneButtonCallsCallback() throws {
-        var called = false
-        // swiftlint:disable:next trailing_closure
-        let sut = makeView(status: makeStatus(state: .idle), onRecordMicrophone: { called = true })
-
-        try sut.inspect().find(button: "Record Microphone").tap()
-
-        XCTAssertTrue(called)
-    }
-
-    func testRecordMicrophoneButtonHiddenWhileRecording() throws {
-        // Same rule as Record App...: the menu offers Stop Recording instead.
-        let sut = makeView(status: makeStatus(state: .recording))
-        let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(button: "Record Microphone"))
-    }
-
-    func testRecordMicrophoneButtonDisabledWhenNoMicIsSet() throws {
-        // Visible but dead, on purpose: someone who set "No Microphone" months
-        // ago needs to see the entry to learn why it cannot run, and starting
-        // anyway would record nothing.
-        let sut = makeView(status: makeStatus(state: .idle), noMic: true)
-
-        let button = try sut.inspect().find(button: "Record Microphone")
-        XCTAssertTrue(button.isDisabled())
-    }
-
-    func testRecordMicrophoneButtonDisabledWhileAManualStartIsStillInFlight() throws {
-        // The window between registering a start and the loop existing. The
-        // narrow `state == .recording` predicate misses it, leaving the item
-        // enabled and the click silently dropped by the ownership guard.
-        let sut = makeView(status: makeStatus(state: .idle), manualRecordingPendingOrActive: true)
-
-        let button = try sut.inspect().find(button: "Record Microphone")
-        XCTAssertTrue(button.isDisabled())
-    }
-
-    func testRecordMicrophoneButtonEnabledWhenTheMicrophoneIsAllowed() throws {
-        // Control for the assertion above: without it a button that was always
-        // disabled would pass just as well.
-        let sut = makeView(status: makeStatus(state: .idle), noMic: false)
-
-        let button = try sut.inspect().find(button: "Record Microphone")
-        XCTAssertFalse(button.isDisabled())
+        XCTAssertThrowsError(try body.find(button: "Record"))
     }
 
     // MARK: - Button tap callbacks
-
-    func testStartStopButtonCallsCallback() throws {
-        var called = false
-        let sut = MenuBarView(
-            status: makeStatus(state: .idle),
-            isWatching: false,
-            pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
-            onStartStop: { called = true },
-            onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onNameSpeakers: nil,
-            onProcessFiles: {},
-            onDismissJob: { _ in },
-            onQuit: {},
-        )
-        let body = try sut.inspect()
-        try body.find(button: "Start Watching").tap()
-        XCTAssertTrue(called)
-    }
 
     func testQuitButtonCallsCallback() throws {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
-            isWatching: false,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -310,14 +201,9 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
-            isWatching: false,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -338,14 +224,9 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
-            isWatching: false,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -366,14 +247,9 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .protocolReady, protocolPath: "/tmp/p.md"),
-            isWatching: false,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: { called = true },
@@ -394,14 +270,9 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .waitingForSpeakerNames),
-            isWatching: false,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -458,14 +329,9 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: queue,
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -498,14 +364,9 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: queue,
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -525,14 +386,9 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -565,14 +421,9 @@ final class MenuBarViewTests: XCTestCase {
         var dismissedID: UUID?
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: queue,
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -604,14 +455,9 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: queue,
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -645,14 +491,9 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: queue,
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -666,48 +507,6 @@ final class MenuBarViewTests: XCTestCase {
         )
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Diarization failed — speakers not identified"))
-    }
-
-    // MARK: - Record App button
-
-    func testRecordAppButtonExistsWhenIdle() throws {
-        let sut = makeView(status: makeStatus(state: .idle))
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Record App..."))
-    }
-
-    func testRecordAppButtonHiddenDuringRecording() throws {
-        let sut = makeView(status: makeStatus(state: .recording))
-        let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(text: "Record App..."))
-    }
-
-    func testRecordAppButtonCallsCallback() throws {
-        var called = false
-        let sut = MenuBarView(
-            status: makeStatus(state: .idle),
-            isWatching: false,
-            pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
-            onStartStop: {},
-            onRecordMeeting: {},
-            onRecordApp: { called = true },
-            onRecordMicrophone: {},
-            noMic: false,
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onNameSpeakers: nil,
-            onProcessFiles: {},
-            onDismissJob: { _ in },
-            onQuit: {},
-        )
-        let body = try sut.inspect()
-        try body.find(button: "Record App...").tap()
-        XCTAssertTrue(called)
     }
 
     // MARK: - Stop Recording button (manual)
@@ -729,14 +528,9 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .recording),
-            isWatching: false,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: { called = true },
             onOpenLastProtocol: {},
@@ -807,14 +601,9 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: queue,
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
@@ -832,19 +621,19 @@ final class MenuBarViewTests: XCTestCase {
 
     // MARK: - Record/Stop button mutual exclusion
 
-    func testRecordAppAndStopBothHiddenDuringAutoRecording() throws {
+    func testRecordAndStopBothHiddenDuringAutoRecording() throws {
         let sut = makeView(status: makeStatus(state: .recording), onStopManualRecording: nil)
         let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(text: "Record App..."))
+        XCTAssertThrowsError(try body.find(button: "Record"))
         XCTAssertThrowsError(try body.find(text: "Stop Recording"))
     }
 
-    func testStopRecordingReplacesRecordAppButton() throws {
+    func testStopRecordingReplacesRecordButton() throws {
         // swiftlint:disable:next trailing_closure
         let sut = makeView(status: makeStatus(state: .idle), onStopManualRecording: {})
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Stop Recording"))
-        XCTAssertThrowsError(try body.find(text: "Record App..."))
+        XCTAssertThrowsError(try body.find(button: "Record"))
     }
 
     // MARK: - Job state labels
@@ -915,7 +704,7 @@ final class MenuBarViewTests: XCTestCase {
 
     func testAllTranscriberStateLabelsRendered() throws {
         let states: [TranscriberState] = [
-            .idle, .watching, .recording, .transcribing,
+            .idle, .recording, .transcribing,
             .generatingProtocol, .protocolReady, .error,
         ]
         for state in states {
@@ -949,14 +738,9 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
-            isWatching: false,
             pipelineQueue: queue,
             updateChecker: nil,
-            onStartStop: {},
             onRecordMeeting: {},
-            onRecordApp: {},
-            onRecordMicrophone: {},
-            noMic: false,
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},

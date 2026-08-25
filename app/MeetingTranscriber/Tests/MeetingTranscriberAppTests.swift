@@ -3,32 +3,6 @@ import XCTest
 
 @MainActor
 final class MeetingTranscriberAppTests: XCTestCase {
-    // MARK: - shouldAutoWatch
-
-    func testAutoWatchWithFlag() {
-        let result = MeetingTranscriberApp.shouldAutoWatch(
-            commandLineArgs: ["app", "--auto-watch"],
-            autoWatchSetting: false,
-        )
-        XCTAssertTrue(result)
-    }
-
-    func testAutoWatchWithSetting() {
-        let result = MeetingTranscriberApp.shouldAutoWatch(
-            commandLineArgs: [],
-            autoWatchSetting: true,
-        )
-        XCTAssertTrue(result)
-    }
-
-    func testAutoWatchBothFalse() {
-        let result = MeetingTranscriberApp.shouldAutoWatch(
-            commandLineArgs: [],
-            autoWatchSetting: false,
-        )
-        XCTAssertFalse(result)
-    }
-
     // MARK: - lastCompletedProtocolPath
 
     func testLastProtocolPathReturnsLatestJob() {

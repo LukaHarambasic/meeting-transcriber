@@ -4,9 +4,9 @@
 
     /// Covers the `isManualRecording` flag exposed in the RPC `/state` snapshot:
     /// that the snapshot builder wires it from `AppState.isManualRecording` (not a
-    /// hardcode), and that it serialises. `watchState` reads "recording" for both
-    /// auto-detected and manual recordings, so this is the only wire signal that
-    /// distinguishes the manual (app-picker) path.
+    /// hardcode), and that it serialises. `/v1/record`'s reported state reads
+    /// "recording" regardless of source, so this is the only wire signal that
+    /// distinguishes the manual (app-picker/microphone) path.
     @MainActor
     final class RPCManualRecordingStateTests: XCTestCase {
         // MARK: - Wiring: snapshot.isManualRecording follows AppState (non-vacuous)

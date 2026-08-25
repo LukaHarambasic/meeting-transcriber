@@ -4,8 +4,8 @@ import XCTest
 
 /// Builds a `WatchingController` wired to real (but inert) sibling controllers
 /// and the supplied seams. The pipeline gets a queue on an isolated `logDir` so
-/// `rebuild()` touches no production path, and the default detector never
-/// matches a window so no recording starts.
+/// `rebuild()` touches no production path; no recording starts unless a test
+/// explicitly calls one of the manual-recording entry points.
 ///
 /// Its own file because `WatchingControllerTests` sits at the 600-line cap, and
 /// because a second suite now needs the same wiring.
@@ -78,12 +78,9 @@ extension XCTestCase {
         notifier: RecordingNotifier = RecordingNotifier(),
         ensureMicAccess: @escaping () async -> Bool = { true },
         requestScreenRecording: @escaping () -> Void = {},
-        requestAccessibility: @escaping () -> Void = {},
-        watchTeams: Bool = true,
         noMic: Bool = false,
         permissionHealth: HealthCheckResult? = nil,
         startJoinTimeout: Duration = WatchingController.defaultStartJoinTimeout,
-        makeDetector: @escaping () -> any MeetingDetecting = { makeSilentDetector() },
         makeRecorder: @escaping @MainActor () -> any RecordingProvider = { makeMockRecorder() },
     ) -> WatchingController {
         // Own defaults suite, like `makeRPCTestState`: `AppSettings()` on
@@ -94,10 +91,10 @@ extension XCTestCase {
         // One suite per test PROCESS, not per call, and a sweep of the ones
         // dead processes left behind.
         //
-        // Isolation is not optional here: this factory writes `noMic` and
-        // `watchTeams`, and `performManualRecording` reads `recordOnly` and the
-        // output directory back out of the same domain, so a value stranded in
-        // `.standard` could send a test into a real user folder. But a suite
+        // Isolation is not optional here: this factory writes `noMic`, and
+        // `performManualRecording` reads `recordOnly` and the output directory
+        // back out of the same domain, so a value stranded in `.standard`
+        // could send a test into a real user folder. But a suite
         // cannot be un-created: the preferences daemon owns the file's
         // lifecycle and flushes its cached copy back after any removal the test
         // performs. Measured across three attempts (remove domain, then also
@@ -114,7 +111,6 @@ extension XCTestCase {
         // both to persist.
         UserDefaults().removePersistentDomain(forName: suite)
         let settings = AppSettings(defaults: UserDefaults(suiteName: suite) ?? .standard)
-        settings.watchTeams = watchTeams
         settings.noMic = noMic
         let pipeline = PipelineController(settings: settings, notifier: notifier)
         pipeline.queue = PipelineQueue(logDir: logDir)
@@ -140,9 +136,7 @@ extension XCTestCase {
             liveTranscription: liveTranscription,
             ensureMicAccess: ensureMicAccess,
             requestScreenRecording: requestScreenRecording,
-            requestAccessibility: requestAccessibility,
             startJoinTimeout: startJoinTimeout,
-            makeDetector: makeDetector,
             makeRecorder: makeRecorder,
         )
     }

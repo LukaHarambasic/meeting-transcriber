@@ -10,6 +10,9 @@ final class WatchLoopMeetingStartTimeTests: XCTestCase {
     /// any meeting spanning a sleep (uptime freezes while asleep). Injecting a
     /// fixed absolute instant the uptime math would never reproduce pins that:
     /// pass-through yields exactly this instant; the old round-trip yields ~now.
+    /// Re-anchored on the manual-recording path (the only recording path left):
+    /// `meetingStartTime` still comes from the recorder's `RecordingResult`
+    /// either way, so the invariant is unchanged by dropping auto-detection.
     func testEnqueueAnchorsMeetingStartTimeOnRecorderStartDate() async throws {
         let fixedStart = Date(timeIntervalSince1970: 1_600_000_000) // 2020-09-13, far from "now"
         let recorder = MockRecorder()
@@ -17,11 +20,9 @@ final class WatchLoopMeetingStartTimeTests: XCTestCase {
         recorder.recordingStartDate = fixedStart
         let queue = PipelineQueue()
         let loop = WatchLoop(
-            detector: ImmediatelyInactiveDetector(),
             recorderFactory: { recorder },
             pipelineQueue: queue,
             pollInterval: 0.01,
-            endGracePeriod: 0.01,
             maxDuration: 10,
             noMic: true,
         )
@@ -29,15 +30,10 @@ final class WatchLoopMeetingStartTimeTests: XCTestCase {
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 
-        let meeting = DetectedMeeting(
-            pattern: .teams,
-            windowTitle: "Test Meeting | Microsoft Teams",
-            ownerName: "Microsoft Teams",
-            windowPID: 9999,
-        )
-        try await loop.handleMeeting(meeting)
+        try await loop.startManualRecording(pid: 9999, appName: "Microsoft Teams", title: "Test Meeting")
+        loop.stopManualRecording()
 
-        let job = try XCTUnwrap(queue.jobs.first, "handleMeeting must enqueue a job")
+        let job = try XCTUnwrap(queue.jobs.first, "stopManualRecording must enqueue a job")
         let startTime = try XCTUnwrap(
             job.meetingStartTime,
             "enqueue must anchor meetingStartTime on the recorder's recordingStartDate",

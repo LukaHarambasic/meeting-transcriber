@@ -2,12 +2,11 @@
 import XCTest
 
 final class BadgeKindComputeTests: XCTestCase {
-    // MARK: WatchLoop active
+    // MARK: Recording active
 
-    func testBadgeRecordingWhenWatchLoopStateIsRecording() {
+    func testBadgeRecordingWhenRecordingActiveAndStateIsRecording() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .recording,
+            recordingActive: true,
             transcriberState: .recording,
             activeJobState: nil,
             updateAvailable: false,
@@ -17,8 +16,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeTranscribingForTranscribingState() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .transcribing,
             activeJobState: nil,
             updateAvailable: false,
@@ -28,8 +26,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeTranscribingForRecordingDoneState() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .recordingDone,
             activeJobState: nil,
             updateAvailable: false,
@@ -39,8 +36,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeUserActionForWaitingForSpeakerCount() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .waitingForSpeakerCount,
             activeJobState: nil,
             updateAvailable: false,
@@ -50,8 +46,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeUserActionForWaitingForSpeakerNames() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .waitingForSpeakerNames,
             activeJobState: nil,
             updateAvailable: false,
@@ -61,8 +56,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeDoneForProtocolReadyState() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .protocolReady,
             activeJobState: nil,
             updateAvailable: false,
@@ -72,8 +66,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeErrorForErrorState() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .error,
             activeJobState: nil,
             updateAvailable: false,
@@ -83,8 +76,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeProcessingForGeneratingProtocol() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .watching,
+            recordingActive: true,
             transcriberState: .generatingProtocol,
             activeJobState: nil,
             updateAvailable: false,
@@ -92,12 +84,11 @@ final class BadgeKindComputeTests: XCTestCase {
         XCTAssertEqual(badge, .processing)
     }
 
-    // MARK: WatchLoop inactive, active job
+    // MARK: Not recording, active job
 
     func testBadgeTranscribingForActiveTranscribingJob() {
         let badge = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .transcribing,
             updateAvailable: false,
@@ -107,8 +98,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeDiarizingForActiveDiarizingJob() {
         let badge = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .diarizing,
             updateAvailable: false,
@@ -118,8 +108,7 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeProcessingForActiveGeneratingProtocolJob() {
         let badge = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: .generatingProtocol,
             updateAvailable: false,
@@ -127,10 +116,9 @@ final class BadgeKindComputeTests: XCTestCase {
         XCTAssertEqual(badge, .processing)
     }
 
-    func testWatchLoopTakesPriorityOverActiveJob() {
+    func testRecordingActiveTakesPriorityOverActiveJob() {
         let badge = BadgeKind.compute(
-            watchLoopActive: true,
-            watchLoopState: .recording,
+            recordingActive: true,
             transcriberState: .recording,
             activeJobState: .transcribing,
             updateAvailable: false,
@@ -138,12 +126,11 @@ final class BadgeKindComputeTests: XCTestCase {
         XCTAssertEqual(badge, .recording)
     }
 
-    // MARK: No watchloop, no jobs
+    // MARK: No recording, no jobs
 
-    func testBadgeUpdateAvailableWhenNoWatchLoopNoJobs() {
+    func testBadgeUpdateAvailableWhenNoRecordingNoJobs() {
         let badge = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
             updateAvailable: true,
@@ -153,12 +140,24 @@ final class BadgeKindComputeTests: XCTestCase {
 
     func testBadgeInactiveWhenNothingActive() {
         let badge = BadgeKind.compute(
-            watchLoopActive: false,
-            watchLoopState: .idle,
+            recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
             updateAvailable: false,
         )
         XCTAssertEqual(badge, .inactive)
+    }
+
+    // MARK: Permission problem
+
+    func testBadgeErrorWhenPermissionProblemAndIdle() {
+        let badge = BadgeKind.compute(
+            recordingActive: false,
+            transcriberState: .idle,
+            activeJobState: nil,
+            updateAvailable: false,
+            permissionProblem: true,
+        )
+        XCTAssertEqual(badge, .error)
     }
 }
