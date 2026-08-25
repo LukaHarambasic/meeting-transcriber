@@ -54,6 +54,12 @@ struct RecordStatusDTO: Codable, Equatable {
     /// taps a process), and reporting it would describe this endpoint as broken
     /// on exactly the machines where it is the capture path that still works.
     let microphoneHealthy: Bool
+    /// The Screen Recording arm, on the same unknown-reads-true terms. It
+    /// explains the 412 the microphone fields cannot: an `app` or `system`
+    /// start opens a process tap, which that grant gates (it is the only
+    /// preflightable proxy for the tap), while a plain microphone start is
+    /// unaffected however unhealthy this reads.
+    let screenRecordingHealthy: Bool
 
     /// Fallback for the window between server start and `AppState` being
     /// reachable. Reports "not recording, nothing in the way" rather than
@@ -67,6 +73,7 @@ struct RecordStatusDTO: Codable, Equatable {
         otherRecordingActive: false,
         noMic: false,
         microphoneHealthy: true,
+        screenRecordingHealthy: true,
     )
 }
 
