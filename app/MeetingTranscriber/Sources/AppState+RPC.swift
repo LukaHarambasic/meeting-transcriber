@@ -199,6 +199,10 @@
             // and `WatchStatusDTO.permissionsHealthy` read an unknown result the
             // same way.
             let micHealthy = permissions.health?.recordingBlockers(for: .micOnly).isEmpty ?? true
+            // `.systemOnly` isolates the Screen Recording arm the same way
+            // `.micOnly` isolates the microphone's: it is a source shape whose
+            // blockers are exactly that grant's problems, and it needs no pid.
+            let screenHealthy = permissions.health?.recordingBlockers(for: .systemOnly).isEmpty ?? true
             return RecordStatusDTO(
                 recording: watching.isRecordingMicrophoneOnly,
                 startPending: watching.isManualStartPending,
@@ -207,6 +211,7 @@
                 otherRecordingActive: watching.isRecordingOtherThanMicrophone,
                 noMic: settings.noMic,
                 microphoneHealthy: micHealthy,
+                screenRecordingHealthy: screenHealthy,
             )
         }
 

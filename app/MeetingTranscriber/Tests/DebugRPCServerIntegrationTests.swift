@@ -1207,7 +1207,7 @@
         func testV1RecordGETReturnsStatus() async throws {
             let dto = RecordStatusDTO(
                 recording: true, startPending: false, state: "recording", badge: "recording",
-                otherRecordingActive: false, noMic: false, microphoneHealthy: true,
+                otherRecordingActive: false, noMic: false, microphoneHealthy: true, screenRecordingHealthy: true,
             )
             // Typed local, not a trailing closure — see testV1WatchGETReturnsStatus.
             let status: () -> RecordStatusDTO = { dto }
@@ -1234,7 +1234,7 @@
                     RecordStatusDTO(
                         recording: isRecording, startPending: false, state: isRecording ? "recording" : nil,
                         badge: "inactive", otherRecordingActive: false,
-                        noMic: false, microphoneHealthy: true,
+                        noMic: false, microphoneHealthy: true, screenRecordingHealthy: true,
                     )
                 },
                 recordControl: { payload in
@@ -1266,7 +1266,7 @@
         func testV1RecordPOSTBlockedReturns409() async throws {
             let dto = RecordStatusDTO(
                 recording: false, startPending: false, state: "recording", badge: "recording",
-                otherRecordingActive: true, noMic: false, microphoneHealthy: true,
+                otherRecordingActive: true, noMic: false, microphoneHealthy: true, screenRecordingHealthy: true,
             )
             let base = try await startServer(recordStatus: { dto }, recordControl: { _ in .blocked })
 
@@ -1286,7 +1286,7 @@
         func testV1RecordPOSTRefusedReturns412() async throws {
             let dto = RecordStatusDTO(
                 recording: false, startPending: false, state: nil, badge: "inactive",
-                otherRecordingActive: false, noMic: true, microphoneHealthy: false,
+                otherRecordingActive: false, noMic: true, microphoneHealthy: false, screenRecordingHealthy: true,
             )
             let base = try await startServer(recordStatus: { dto }, recordControl: { _ in .refused })
 

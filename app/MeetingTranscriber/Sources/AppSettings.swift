@@ -492,7 +492,9 @@ final class AppSettings {
             .flatMap(TranscriptionEngineSetting.init(rawValue:))) ?? .whisperKit
         whisperKitModel = defaults.object(forKey: "whisperKitModel") as? String
             ?? "openai_whisper-large-v3-v20240930_turbo"
-        whisperLanguage = defaults.object(forKey: "whisperLanguage") as? String ?? "de"
+        // "en" rather than upstream's "de": this variant's meetings are always
+        // English (owner preference, 2026-08-25).
+        whisperLanguage = defaults.object(forKey: "whisperLanguage") as? String ?? "en"
         parakeetLanguage = defaults.object(forKey: "parakeetLanguage") as? String ?? ""
         customVocabularyPath = defaults.string(forKey: "customVocabularyPath") ?? ""
         diarize = defaults.object(forKey: "diarize") as? Bool ?? true
@@ -515,7 +517,9 @@ final class AppSettings {
             protocolProvider = storedProvider ?? .claudeCLI
             claudeBin = defaults.object(forKey: "claudeBin") as? String ?? "claude"
         #endif
-        protocolLanguage = defaults.string(forKey: "protocolLanguage") ?? "German"
+        // English rather than upstream's German: this variant's meetings and
+        // protocols are always English (owner preference, 2026-08-25).
+        protocolLanguage = defaults.string(forKey: "protocolLanguage") ?? "English"
 
         openAIEndpoint = defaults.object(forKey: "openAIEndpoint") as? String
             ?? Self.defaultOpenAIEndpoint
