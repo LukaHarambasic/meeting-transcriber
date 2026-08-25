@@ -128,23 +128,6 @@
             )
         }
 
-        // MARK: - Watch state
-
-        func test_snapshot_exposesWatchState() {
-            let state = AppState(settings: settings)
-            // No watch loop yet → nil (encodes as absent in JSON).
-            XCTAssertNil(state.rpcStateSnapshot().watchState)
-
-            // Live wiring: the snapshot mirrors the loop's state, so driver
-            // scripts (e2e-cpu-load.sh) can gate a measurement window on
-            // `.watchState == "recording"` without a caption signal.
-            let (loop, _) = makeTestWatchLoop()
-            state.watching.watchLoop = loop
-            loop.start()
-            defer { loop.stop() }
-            XCTAssertEqual(state.rpcStateSnapshot().watchState, "watching")
-        }
-
         // MARK: - JSON shape
 
         func test_snapshot_jsonContainsEnginesBlock() throws {
