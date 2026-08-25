@@ -66,7 +66,7 @@ per connection; exceeding it closes the connection without sending a response.
 | `GET`  | `/v1/watch` | Read whether the app is watching for meetings. |
 | `POST` | `/v1/watch` | Start, stop or toggle meeting watching. |
 | `GET`  | `/v1/record` | Read whether a microphone-only recording is running. |
-| `POST` | `/v1/record` | Start, stop or toggle a manual recording (microphone by default, or a specific app via `source`). |
+| `POST` | `/v1/record` | Start, stop or toggle a manual recording (microphone by default; a specific app or the whole system output via `source`). |
 
 A query string is stripped before routing, so `/v1/jobs/<id>?foo=bar` still
 resolves the id. The one query parameter with meaning is `include=transcript`
@@ -282,11 +282,15 @@ state rather than failing.
 ### POST /v1/record
 
 Start, stop or toggle a manual recording. With no `source` (or
-`"source":"mic"`) it records the system microphone with no app audio, for a
-meeting happening in the room rather than in an app — the same thing the menu
-bar's *Record Microphone* item does. With `"source":"app"` it records a
-specific process's audio plus the microphone, the same capture the menu bar's
-*Record App…* picker starts.
+`"source":"mic"`) it records the system microphone with no app audio — the same
+thing the menu bar's *Record Microphone* item does. With `"source":"app"` it
+records a specific process's audio plus the microphone, the same capture the
+menu bar's *Record App…* picker starts. With `"source":"system"` it records the
+**whole system output** plus the microphone — the menu bar's *Record Meeting*
+item, for an in-room meeting where remote participants play through
+loudspeakers and no single app is the audio source. A `system` payload takes no
+`pid`/`appName`/`title`: the recording's identity is fixed ("Meeting" /
+"Meeting Recording").
 
 ```bash
 curl -sS -X POST "$BASE/v1/record" \
@@ -552,9 +556,14 @@ as `null`, following the same convention as the other DTOs.
   refused with `412` while this is true.
 - `microphoneHealthy`: false only when a microphone probe has actually failed
   (denied, or allowed but not working). A check that has not run yet reports
-  `true`. Scoped to the one permission this endpoint needs: a denied Screen
-  Recording grant does not appear here, because a microphone recording opens no
-  process tap for it to gate.
+  `true`. Scoped to the one permission a microphone recording needs: a denied
+  Screen Recording grant does not appear here, because a microphone recording
+  opens no process tap for it to gate.
+- `screenRecordingHealthy`: the Screen Recording arm, on the same
+  unknown-reads-true terms. It explains the `412` the microphone fields cannot:
+  an `app` or `system` start opens a process tap, which that grant gates (it is
+  the only preflightable proxy for the tap). A plain microphone start is
+  unaffected however unhealthy this reads.
 
 ## Status codes
 
@@ -567,7 +576,7 @@ as `null`, following the same convention as the other DTOs.
 | `403` | Rejected by the Origin or Host guard. |
 | `404` | Unknown job id. Also `GET /v1/jobs/<id>/naming` when the job is not awaiting naming (the GET folds wrong-state into `404`; the POST naming routes use `409` instead). |
 | `409` | Confirm/skip naming on a job that exists but is not awaiting naming. Also `POST /v1/watch` while a manual recording owns the watch loop, and `POST /v1/record` while any other recording owns it. |
-| `412` | `POST /v1/record` only: nothing would be captured ("No Microphone" is set, or the mic permission is denied/broken). Stable until a setting changes, so do not retry. |
+| `412` | `POST /v1/record` only: nothing would be captured. For a mic start: "No Microphone" is set, or the mic permission is denied/broken. For an `app`/`system` start: the Screen Recording grant (the tap's preflightable proxy) is denied/broken — read `screenRecordingHealthy`. Stable until a setting changes, so do not retry. |
 | `503` | `POST /v1/watch` and `POST /v1/record`: the action was attempted and did not take. On `/v1/watch` that means the state did not settle within 20 seconds; on `/v1/record` also a recorder that would not start, or a stop whose audio could not be handed to the pipeline. Retryable, unlike `412`. On `/v1/watch` a *denied* microphone gives `200`, not this; on `/v1/record` it gives `412`. |
 
 ## Typical flows
