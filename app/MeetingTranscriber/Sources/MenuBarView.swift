@@ -2,6 +2,11 @@ import SwiftUI
 
 struct MenuBarView: View {
     let status: TranscriberStatus?
+    /// What is currently wrong, or nil when nothing is. Passed separately from
+    /// `status` on purpose: `status` is nil whenever no recording is active, so
+    /// a problem that *stops* recordings from starting — a denied grant, the
+    /// exact case the user hit — could never be shown through it.
+    let issue: RecordingIssue?
     let pipelineQueue: PipelineQueue
     var updateChecker: UpdateChecker?
     let onRecordMeeting: () -> Void
@@ -42,7 +47,7 @@ struct MenuBarView: View {
     var body: some View {
         statusHeader
         meetingInfo
-        errorInfo
+        issueInfo
 
         Divider()
 
@@ -96,13 +101,48 @@ struct MenuBarView: View {
         }
     }
 
-    @ViewBuilder private var errorInfo: some View {
-        if let error = status?.error, state == .error {
+    /// The row that says what is wrong and offers the pane that fixes it.
+    ///
+    /// Replaces a row that only rendered `status?.error` while the state was
+    /// `.error`. That combination was unreachable for the failure that prompted
+    /// this: `status` is nil unless a recording is active, so a refusal to start
+    /// one showed nothing, and the user saw a red icon above the word "Idle"
+    /// with no explanation anywhere in the app.
+    ///
+    /// The remedy button is separate from the text block so it is a real menu
+    /// item the user can click, not a caption inside a `VStack`.
+    @ViewBuilder private var issueInfo: some View {
+        if let issue {
             Divider()
-            Text(error)
+            issueText(issue)
+            issueRemedyButton(issue)
+        }
+    }
+
+    private func issueText(_ issue: RecordingIssue) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(issue.headline)
                 .font(.caption)
+                .fontWeight(.medium)
                 .foregroundStyle(.red)
-                .padding(.horizontal, 4)
+            Text(issue.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    /// Hoisted into its own function rather than inlined in `issueInfo`: the
+    /// optional-chained `remedy?.settingsURL` inside a `ViewBuilder` is the
+    /// shape this file's 300 ms type-check budget keeps failing on (see `body`).
+    @ViewBuilder
+    private func issueRemedyButton(_ issue: RecordingIssue) -> some View {
+        if let remedy = issue.remedy, let url = remedy.settingsURL {
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Label(remedy.buttonTitle, systemImage: "gearshape")
+            }
         }
     }
 

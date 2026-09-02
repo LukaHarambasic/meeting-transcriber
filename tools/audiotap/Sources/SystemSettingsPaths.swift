@@ -24,4 +24,22 @@ public enum SystemSettingsPaths {
         let pane = sequoiaOrLater ? "Screen & System Audio Recording" : "Screen Recording"
         return "System Settings → Privacy & Security → \(pane)"
     }
+
+    /// Deep link that opens the Screen Recording pane directly.
+    ///
+    /// Lives next to the label rather than at the call site for the same reason
+    /// the label does: a UI that prints one pane's name and opens another is
+    /// worse than one that only prints. The anchor (`Privacy_ScreenCapture`) is
+    /// unchanged by the Sequoia rename, so unlike the label this needs no OS
+    /// branch. Force-unwrapping is avoided even though the literal is constant —
+    /// a nil here means no button rather than a crash in the menu bar.
+    public static var screenRecordingURL: URL? {
+        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+    }
+
+    /// Deep link that opens the Microphone pane directly. See
+    /// ``screenRecordingURL`` for why this is a URL rather than a bare string.
+    public static var microphoneURL: URL? {
+        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+    }
 }
