@@ -1,5 +1,8 @@
 import AppKit
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: AppPaths.logSubsystem, category: "PowerEventMonitor")
 
 /// Bridges the two `NSWorkspace` power notifications a recording has to react to
 /// into plain closures, so the recording lifecycle never imports AppKit and can
@@ -19,7 +22,14 @@ final class PowerEventMonitor {
     /// Retained so the observers outlive the initialiser. Dropping them would
     /// deregister silently, which looks exactly like a machine that never
     /// slept — hence the `discarded_notification_center_observer` lint rule.
-    private var observers: [any NSObjectProtocol] = []
+    ///
+    /// Retention is its whole job; nothing reads it. `AppState` owns the one
+    /// monitor and lives for the whole process, the same reasoning its other
+    /// permanent observer is annotated with, so there is no deregistration path
+    /// to write. (A `stop()` for symmetry was written and deleted: nothing
+    /// called it, which the `unused_declaration` analyzer caught. `deinit`
+    /// cannot do it either — `deinit` is nonisolated and this is `@MainActor`.)
+    private let observers: [any NSObjectProtocol]
 
     init(
         onWillSleep: @escaping @MainActor () -> Void,
@@ -34,21 +44,11 @@ final class PowerEventMonitor {
                 forName: NSWorkspace.didWakeNotification, object: nil, queue: .main,
             ) { _ in MainActor.assumeIsolated { onDidWake() } },
         ]
-    }
-
-    /// Deregister explicitly. Not called in production — `AppState` owns the one
-    /// monitor and lives for the whole process, the same reasoning its other
-    /// permanent observer is annotated with — but a test that builds a monitor
-    /// per case needs a way to stop the previous one from also answering.
-    ///
-    /// A `deinit` doing this would be the obvious home and cannot be: `deinit`
-    /// is nonisolated and `observers` is main-actor isolated, which Swift 6
-    /// rejects.
-    func stop() {
-        let center = NSWorkspace.shared.notificationCenter
-        for observer in observers {
-            center.removeObserver(observer)
-        }
-        observers = []
+        // Worth a breadcrumb precisely because the failure this guards against
+        // is silent: registering on the wrong notification center, or dropping
+        // the tokens, both look exactly like a Mac that never slept. If a
+        // recording is lost to a lid close, the first question is whether the
+        // handler was ever armed, and this answers it.
+        logger.info("power_event_monitor_armed observations=\(self.observers.count, privacy: .public)")
     }
 }
