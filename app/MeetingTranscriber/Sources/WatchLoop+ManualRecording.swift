@@ -36,6 +36,10 @@ extension WatchLoop {
                 stopManualRecording()
                 return
             }
+            // After the hard stop conditions, not before: a recording whose
+            // target already exited should end for that reason, with that log
+            // line, rather than being attributed to an unanswered check.
+            guard stepConfirmation(now: nowProvider()) else { return }
             try? await sleepProvider(pollInterval)
         }
     }

@@ -56,7 +56,40 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         }
         isSetUp = true
         scheduler.setDelegate(self)
+        scheduler.setCategories([Self.recordingConfirmationCategory()])
         scheduler.requestAuthorization()
+    }
+
+    // MARK: - Still-recording confirmation
+
+    /// Category identifier for the "Still recording?" ask.
+    static let recordingConfirmationCategoryID = "recording-confirmation"
+
+    /// Action identifier for its "Keep Recording" button.
+    static let keepRecordingActionID = "keep-recording"
+
+    /// Posted when the user answers the ask, so the recording lifecycle hears
+    /// about it without this AppKit-adjacent, non-`@MainActor` type reaching
+    /// into `WatchLoop`. `AppState` observes it and forwards.
+    static let recordingConfirmedNotification = Notification.Name("recordingStillWantedConfirmed")
+
+    /// The category the ask is posted under, with the one action that answers it.
+    ///
+    /// `.foreground` on the action so answering also brings the app forward —
+    /// harmless for a menu-bar app, and it means a click that macOS routes as
+    /// the action rather than the default still visibly does something.
+    static func recordingConfirmationCategory() -> UNNotificationCategory {
+        let keep = UNNotificationAction(
+            identifier: keepRecordingActionID,
+            title: "Keep Recording",
+            options: [.foreground],
+        )
+        return UNNotificationCategory(
+            identifier: recordingConfirmationCategoryID,
+            actions: [keep],
+            intentIdentifiers: [],
+            options: [],
+        )
     }
 
     func notify(title: String, body: String, urgency: NotificationUrgency) {
@@ -76,9 +109,27 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
 
         scheduler.add(UNNotificationRequest(
             identifier: UUID().uuidString,
-            content: Self.makeNotificationContent(title: title, body: body, urgency: urgency),
+            content: Self.makeNotificationContent(
+                title: title,
+                body: body,
+                categoryID: Self.categoryID(forTitle: title),
+                urgency: urgency,
+            ),
             trigger: nil,
         ))
+    }
+
+    /// Which action category a notification with this title belongs to, or nil
+    /// for the ordinary no-buttons kind.
+    ///
+    /// Routing on the title rather than adding a `category` parameter to
+    /// `AppNotifying.notify`: that protocol is deliberately narrow, is witnessed
+    /// by a silent no-op and by test doubles, and its own doc comment explains
+    /// why widening it invites conformers that quietly drop the new argument.
+    /// One notification in the whole app has an action, and it owns its title as
+    /// a shared constant, so a title match is exact rather than a guess.
+    static func categoryID(forTitle title: String) -> String? {
+        title == RecordingConfirmationPolicy.promptTitle ? recordingConfirmationCategoryID : nil
     }
 
     /// Pure builder for a notification's `UNMutableNotificationContent` (title,
@@ -150,5 +201,30 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
     // swiftlint:disable:next async_without_await
     func userNotificationCenter(_: UNUserNotificationCenter, willPresent _: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
+    }
+
+    /// Route an answered "Still recording?" ask back to the recording lifecycle.
+    ///
+    /// Both the "Keep Recording" button and a click on the banner body itself
+    /// (`UNNotificationDefaultActionIdentifier`) count as an answer — the body
+    /// click is the one most people make, and treating it as no answer would
+    /// stop a recording the user just told the app they wanted. An explicit
+    /// dismiss deliberately does not count: swiping the ask away is not
+    /// confirming it.
+    func userNotificationCenter(
+        _: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+    ) async {
+        let content = response.notification.request.content
+        guard content.categoryIdentifier == Self.recordingConfirmationCategoryID else { return }
+        let answered = response.actionIdentifier == Self.keepRecordingActionID
+            || response.actionIdentifier == UNNotificationDefaultActionIdentifier
+        guard answered else { return }
+        // Hop to the main actor: this delegate is invoked on an arbitrary queue
+        // (the reason the whole class is `@unchecked Sendable` rather than
+        // `@MainActor`), and the observer on the other end mutates `WatchLoop`.
+        await MainActor.run {
+            NotificationCenter.default.post(name: Self.recordingConfirmedNotification, object: nil)
+        }
     }
 }

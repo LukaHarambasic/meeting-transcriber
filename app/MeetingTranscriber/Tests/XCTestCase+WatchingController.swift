@@ -82,6 +82,22 @@ extension XCTestCase {
         permissionHealth: HealthCheckResult? = nil,
         startJoinTimeout: Duration = WatchingController.defaultStartJoinTimeout,
         makeRecorder: @escaping @MainActor () -> any RecordingProvider = { makeMockRecorder() },
+        // Both of the following default AWAY from production on purpose, so no
+        // test can reach the machine's real power management or the real
+        // staging directory by simply not mentioning them.
+        //
+        // `makeSleepBlocker`: the production `RecordingPowerAssertion` would
+        // take a real IOKit assertion for every test that starts a recording,
+        // and one leaked by a failed test would leave the machine unable to
+        // idle-sleep for the rest of the boot.
+        makeSleepBlocker: @escaping @MainActor () -> any RecordingSleepBlocking = {
+            SpySleepBlocker()
+        },
+        confirmationPolicy: RecordingConfirmationPolicy = RecordingConfirmationPolicy(),
+        // `recoverInterrupted`: the production implementation re-mixes and
+        // deletes files under `AppPaths.recordingsDir`, which is the user's real
+        // recording staging area on a contributor's machine.
+        recoverInterrupted: @escaping () -> Int = { 0 },
     ) -> WatchingController {
         // Own defaults suite, like `makeRPCTestState`: `AppSettings()` on
         // `.standard` writes into the test host's real preferences, and
@@ -138,6 +154,9 @@ extension XCTestCase {
             requestScreenRecording: requestScreenRecording,
             startJoinTimeout: startJoinTimeout,
             makeRecorder: makeRecorder,
+            makeSleepBlocker: makeSleepBlocker,
+            confirmationPolicy: confirmationPolicy,
+            recoverInterrupted: recoverInterrupted,
         )
     }
 }

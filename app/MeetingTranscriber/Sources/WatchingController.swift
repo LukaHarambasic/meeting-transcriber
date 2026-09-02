@@ -66,6 +66,21 @@ final class WatchingController {
     /// works.)
     private let makeRecorder: @MainActor () -> any RecordingProvider
 
+    /// Builds the power assertion each recording holds. Injectable so a test can
+    /// hand in a spy and assert the recording takes it and gives it back — the
+    /// production type talks to IOKit, which a unit test has no business asking
+    /// anything.
+    private let makeSleepBlocker: @MainActor () -> any RecordingSleepBlocking
+
+    /// The still-recording check's timings, threaded through to each `WatchLoop`
+    /// so a test can shorten them without waiting out half an hour.
+    private let confirmationPolicy: RecordingConfirmationPolicy
+
+    /// Re-mixes tracks left behind by an interruption, returning how many
+    /// recordings it rescued. Injectable for the same reason the loop's copy is:
+    /// the production implementation writes into the real staging directory.
+    private let recoverInterrupted: () -> Int
+
     init(
         settings: AppSettings,
         notifier: any AppNotifying,
@@ -77,6 +92,13 @@ final class WatchingController {
         requestScreenRecording: @escaping () -> Void = { Permissions.ensureScreenRecordingAccess() },
         startJoinTimeout: Duration = WatchingController.defaultStartJoinTimeout,
         makeRecorder: @escaping @MainActor () -> any RecordingProvider = { DualSourceRecorder() },
+        makeSleepBlocker: @escaping @MainActor () -> any RecordingSleepBlocking = {
+            RecordingPowerAssertion()
+        },
+        confirmationPolicy: RecordingConfirmationPolicy = RecordingConfirmationPolicy(),
+        recoverInterrupted: @escaping () -> Int = {
+            DualSourceRecorder.recoverCrashedRecordings(minAge: 0)
+        },
     ) {
         self.settings = settings
         self.notifier = notifier
@@ -88,6 +110,9 @@ final class WatchingController {
         self.requestScreenRecording = requestScreenRecording
         self.startJoinTimeout = startJoinTimeout
         self.makeRecorder = makeRecorder
+        self.makeSleepBlocker = makeSleepBlocker
+        self.confirmationPolicy = confirmationPolicy
+        self.recoverInterrupted = recoverInterrupted
     }
 
     // MARK: - Derived
@@ -217,6 +242,8 @@ final class WatchingController {
                 .production(parent: settings.effectiveOutputDir)
             },
             notifier: notifier,
+            sleepBlocker: makeSleepBlocker(),
+            confirmationPolicy: confirmationPolicy,
         )
         watchLoop = loop
 
@@ -272,6 +299,67 @@ final class WatchingController {
     func stopManualRecording() {
         watchLoop?.stopManualRecording()
         watchLoop = nil
+    }
+
+    /// The user confirmed the recording should keep going, from the
+    /// "Still recording?" notification.
+    func confirmStillRecording() {
+        watchLoop?.confirmStillRecording()
+    }
+
+    // MARK: - Sleep and wake
+
+    /// Finalize and enqueue the active recording because the machine is about to
+    /// sleep.
+    ///
+    /// The power assertion each recording holds
+    /// (`RecordingPowerAssertion`) stops *idle* sleep, so in the reported
+    /// failure — screen darkens, Mac sleeps, recording gone — this handler no
+    /// longer fires at all. It exists for the sleeps an assertion cannot block:
+    /// a closed lid, Apple menu → Sleep, and a critically low battery. In those,
+    /// the process is suspended and the audio devices torn out from under it, so
+    /// a recording left running comes back on wake as a half-written file with
+    /// no clean end.
+    ///
+    /// Stopping is the same path the menu's Stop item takes, so the recording is
+    /// mixed and handed to the pipeline exactly as a user-stopped one. macOS
+    /// waits for this notification's observers before sleeping, and if it stops
+    /// waiting mid-mix the process is suspended rather than killed: the mix
+    /// resumes on wake, and if even that fails the in-progress marker and tracks
+    /// are still on disk for `recoverAfterWake()`.
+    func finalizeForSleep() {
+        guard watchLoop?.isManualRecording == true else { return }
+        notifier.notify(
+            title: "Recording Saved",
+            body: "The Mac is going to sleep, so the recording was stopped and saved.",
+            urgency: .timeSensitive,
+        )
+        stopManualRecording()
+    }
+
+    /// After wake: re-mix and enqueue anything a sleep truncated.
+    ///
+    /// `finalizeForSleep()` handles the sleeps we are told about, but not every
+    /// interruption gives notice — a kernel panic, a battery that ran out, or a
+    /// sleep whose observers were cut short mid-mix all leave per-track WAVs and
+    /// an in-progress marker with no `_mix.wav`. That was already recoverable,
+    /// but only at launch, which for a menu-bar app that never quits could be
+    /// weeks away.
+    ///
+    /// The guard matters: with a recording still live, `minAge: 0` would re-mix
+    /// tracks that are still being written to.
+    func recoverAfterWake() {
+        guard watchLoop?.isManualRecording != true else { return }
+        let recovered = recoverInterrupted()
+        guard recovered > 0 else { return }
+        Task { [pipeline] in
+            await pipeline.queue.recoverOrphanedRecordings()
+        }
+        notifier.notify(
+            title: "Recording Recovered",
+            body: "A recording interrupted by sleep was recovered and is being processed.",
+            urgency: .standard,
+        )
     }
 
     // MARK: - Recorder factory
