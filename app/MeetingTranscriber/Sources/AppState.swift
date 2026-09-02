@@ -115,6 +115,17 @@ final class AppState {
     /// installation to it.
     let liveTranscription: LiveTranscriptionCoordinator
 
+    /// Routes the machine's sleep/wake notifications into the recording
+    /// lifecycle: finalize-and-enqueue before sleep, re-mix-and-enqueue after
+    /// wake. Held for the process lifetime, like the other permanent observer
+    /// registered in `init` below.
+    ///
+    /// This is the half of the sleep problem a power assertion cannot solve. The
+    /// assertion (`RecordingPowerAssertion`, held by `WatchLoop`) stops *idle*
+    /// sleep, which is what darkening the screen used to lead to; a closed lid
+    /// sleeps anyway, and only this saves the recording in that case.
+    @ObservationIgnored private var powerEvents: PowerEventMonitor?
+
     #if !APPSTORE
         /// Debug RPC server lifecycle (launch gate, settings-driven start/stop,
         /// token rotation), extracted into its own controller. `AppState` supplies
@@ -220,6 +231,8 @@ final class AppState {
         )
         pipeline.activate { [weak self] in self?.engines.activeTranscriptionEngine }
 
+        observeRecordingLifecycleEvents()
+
         #if !APPSTORE
             applyForcedChannelFlagsFromEnvironment()
 
@@ -263,6 +276,34 @@ final class AppState {
                 }
             }
         #endif
+    }
+
+    /// Subscribe the recording lifecycle to the two outside events it has to
+    /// react to: the machine sleeping or waking, and the user answering the
+    /// still-recording ask.
+    ///
+    /// Both are registered here rather than inside `WatchingController` so that
+    /// controller stays free of AppKit, matching how every other
+    /// NSWorkspace/NSApplication observer in the app is wired. Split out of
+    /// `init` only to keep its body under the 60-line lint cap.
+    private func observeRecordingLifecycleEvents() {
+        powerEvents = PowerEventMonitor(
+            onWillSleep: { [weak self] in self?.watching.finalizeForSleep() },
+            onDidWake: { [weak self] in self?.watching.recoverAfterWake() },
+        )
+
+        // The still-recording ask's answer arrives here: `NotificationManager`
+        // is not `@MainActor` (its delegate callbacks come from arbitrary
+        // queues), so it posts and this forwards. Leaked until app exit on
+        // purpose, for the same reason as the terminate observer in `init`:
+        // `AppState` lives for the whole process.
+        // swiftlint:disable:next discarded_notification_center_observer
+        NotificationCenter.default.addObserver(
+            forName: NotificationManager.recordingConfirmedNotification,
+            object: nil, queue: .main,
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.watching.confirmStillRecording() }
+        }
     }
 
     #if !APPSTORE

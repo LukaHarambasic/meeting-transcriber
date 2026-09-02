@@ -12,6 +12,7 @@ final class FakeNotificationScheduler: NotificationScheduling, @unchecked Sendab
     private var _added: [UNNotificationRequest] = []
     private(set) weak var delegate: (any UNUserNotificationCenterDelegate)?
     private(set) var authRequested = false
+    private(set) var categories: Set<UNNotificationCategory> = []
 
     init() {}
 
@@ -29,5 +30,9 @@ final class FakeNotificationScheduler: NotificationScheduling, @unchecked Sendab
 
     func requestAuthorization() {
         authRequested = true
+    }
+
+    func setCategories(_ categories: Set<UNNotificationCategory>) {
+        self.categories = categories
     }
 }

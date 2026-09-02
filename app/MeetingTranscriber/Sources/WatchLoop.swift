@@ -77,6 +77,34 @@ class WatchLoop {
     /// spawning a real subprocess.
     let pidAliveCheck: (pid_t) -> Bool
 
+    /// Holds the "don't idle-sleep" power assertion for the length of a
+    /// recording. Optional so a test can pass nil and assert nothing else
+    /// changed; production always supplies one. See `RecordingPowerAssertion`
+    /// for why it blocks system sleep and deliberately not display sleep.
+    let sleepBlocker: (any RecordingSleepBlocking)?
+
+    /// When to ask whether an unattended recording should keep going, and how
+    /// long an unanswered ask may stand. Injected whole so a test can drive
+    /// both boundaries in virtual time.
+    let confirmationPolicy: RecordingConfirmationPolicy
+
+    /// Re-mixes the tracks a failed `stop()` left behind, returning how many
+    /// recordings it rescued. Injectable because the production implementation
+    /// scans and mutates `AppPaths.recordingsDir` — the real staging directory,
+    /// which a unit test has no business writing into — and because the
+    /// interesting assertion is that the *stop path calls it*, not that the
+    /// recovery function works (which `DualSourceRecorder`'s own tests cover).
+    let salvageInterrupted: () -> Int
+
+    /// When this recording was last known to be wanted: its start, or the
+    /// user's last confirmation. `private(set)` for the RPC snapshot and tests.
+    private(set) var confirmedAt: Date = .distantPast
+
+    /// When the outstanding "still recording?" ask was posted, or nil if none
+    /// is. Non-nil suspends the interval entirely — see
+    /// `RecordingConfirmationPolicy`.
+    private(set) var confirmationPromptedAt: Date?
+
     /// Hook called when state changes (for UI updates, notifications, etc.)
     var onStateChange: ((State, State) -> Void)?
 
@@ -98,6 +126,11 @@ class WatchLoop {
             try await Task.sleep(for: .seconds(interval))
         },
         pidAliveCheck: @escaping (pid_t) -> Bool = { kill($0, 0) == 0 },
+        sleepBlocker: (any RecordingSleepBlocking)? = nil,
+        confirmationPolicy: RecordingConfirmationPolicy = RecordingConfirmationPolicy(),
+        salvageInterrupted: @escaping () -> Int = {
+            DualSourceRecorder.recoverCrashedRecordings(minAge: 0)
+        },
     ) {
         self.recorderFactory = recorderFactory
         self.pipelineQueue = pipelineQueue
@@ -112,6 +145,9 @@ class WatchLoop {
         self.nowProvider = nowProvider
         self.sleepProvider = sleepProvider
         self.pidAliveCheck = pidAliveCheck
+        self.sleepBlocker = sleepBlocker
+        self.confirmationPolicy = confirmationPolicy
+        self.salvageInterrupted = salvageInterrupted
     }
 
     nonisolated static var defaultOutputDir: URL {
@@ -199,12 +235,24 @@ class WatchLoop {
             debugLogging: verboseDiagnostics(),
         )
 
+        // Taken only once capture is actually open: a start that threw above
+        // would otherwise leave the Mac awake for a recording that never
+        // happened, and nothing releases an assertion no recording owns.
+        sleepBlocker?.hold(reason: "Meeting Transcriber is recording")
+        confirmedAt = nowProvider()
+        confirmationPromptedAt = nil
+
         let pid = source.appPID
         activeRecorder = recorder
         update { next in
             next.phase = .recording
             next.manualRecordingInfo = ManualRecordingInfo(pid: pid, appName: appName, title: title)
             next.detail = "Recording: \(title)"
+            // A failure from a previous recording has been superseded: this one
+            // got as far as opening capture. Without this the menu's issue row
+            // would keep naming an error the user has visibly moved past, and
+            // the icon would keep its red dot through a healthy recording.
+            next.lastError = nil
         }
 
         manualRecordingTask = Task { [weak self] in
@@ -231,8 +279,11 @@ class WatchLoop {
         } catch {
             logger.error("Failed to stop manual recording: \(error.localizedDescription, privacy: .public)")
             failureMessage = error.localizedDescription
+            salvageInterruptedRecording()
         }
 
+        sleepBlocker?.release()
+        confirmationPromptedAt = nil
         activeRecorder = nil
         update { next in
             next.phase = .idle
@@ -245,8 +296,101 @@ class WatchLoop {
     private func cleanupManualRecording() {
         manualRecordingTask?.cancel()
         manualRecordingTask = nil
+        sleepBlocker?.release()
+        confirmationPromptedAt = nil
         activeRecorder = nil
         update { next in next.manualRecordingInfo = nil }
+    }
+
+    /// Rescue whatever the recorder had written when `stop()` failed.
+    ///
+    /// This is the "if an error occurs, save the rest" path. A failed stop is not
+    /// an empty recording: the per-track WAVs and the in-progress marker are
+    /// still on disk, which is precisely the shape `recoverCrashedRecordings`
+    /// re-mixes after a crash. Until now that only ran at launch, so a stop
+    /// failure meant the audio sat in the staging directory for however long it
+    /// took the user to next quit and reopen the app — and looked, from the
+    /// menu, exactly like a recording that was lost.
+    ///
+    /// `minAge: 0` is safe *because* this runs on the stop path: the guard the
+    /// age window normally provides is "don't re-mix a recording that is still
+    /// being written", and the only recording this app ever has is the one that
+    /// just stopped. Recordings that finished cleanly have a `_mix.wav` and are
+    /// skipped by `crashedRecordingStems` regardless of age.
+    private func salvageInterruptedRecording() {
+        let recovered = salvageInterrupted()
+        guard recovered > 0 else {
+            logger.warning("Stop failed and nothing was recoverable from the staging directory")
+            return
+        }
+        logger.info("Salvaged \(recovered) recording(s) after a failed stop")
+        // The re-mix produced a `_mix.wav` that no job tracks; the orphan scan
+        // is what turns it into one, and it is the same call the launch path
+        // makes, so the recording is processed exactly as any other.
+        Task { [pipelineQueue] in
+            await pipelineQueue?.recoverOrphanedRecordings()
+        }
+        notifier.notify(
+            title: "Recording Salvaged",
+            body: "Stopping the recording failed, but the audio was recovered and is being processed.",
+            urgency: .timeSensitive,
+        )
+    }
+
+    // MARK: - Still-recording confirmation
+
+    /// The user answered the "still recording?" ask. Resets the clock so the
+    /// next ask is a full interval away, and clears the outstanding prompt so
+    /// the grace period stops running.
+    ///
+    /// A no-op when nothing is recording: the notification action can arrive
+    /// after the recording already stopped (the user unlocks the Mac and clicks
+    /// a banner from twenty minutes ago), and confirming then would seed
+    /// `confirmedAt` for a recording that no longer exists.
+    func confirmStillRecording() {
+        guard state == .recording else { return }
+        confirmedAt = nowProvider()
+        confirmationPromptedAt = nil
+        logger.info("Recording confirmed by the user — next check in \(self.confirmationPolicy.interval, privacy: .public)s")
+    }
+
+    /// One confirmation step, run from the manual-recording monitor's poll.
+    /// Returns false when the recording was stopped, so the monitor can exit
+    /// rather than poll a loop that is now idle.
+    ///
+    /// Lives here rather than in the monitor's extension because it mutates
+    /// `confirmationPromptedAt`, which is `private(set)` and so unreachable from
+    /// another file.
+    func stepConfirmation(now: Date) -> Bool {
+        switch confirmationPolicy.step(
+            now: now, confirmedAt: confirmedAt, promptedAt: confirmationPromptedAt,
+        ) {
+        case .wait:
+            return true
+
+        case .prompt:
+            confirmationPromptedAt = now
+            // `.timeSensitive`: the whole point is to reach someone who is in a
+            // meeting, and a meeting is exactly when Focus is on. A suppressed
+            // ask is an ask nobody can answer, which the grace period below
+            // would then read as an abandoned recording and stop.
+            notifier.notify(
+                title: RecordingConfirmationPolicy.promptTitle,
+                body: confirmationPolicy.promptBody,
+                urgency: .timeSensitive,
+            )
+            return true
+
+        case .stopUnconfirmed:
+            logger.info("Still-recording check went unanswered — stopping and saving")
+            stopManualRecording()
+            notifier.notify(
+                title: "Recording Stopped",
+                body: RecordingConfirmationPolicy.timedOutBody,
+                urgency: .timeSensitive,
+            )
+            return false
+        }
     }
 
     // MARK: - Helpers

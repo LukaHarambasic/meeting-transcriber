@@ -14,6 +14,12 @@ protocol NotificationScheduling: AnyObject, Sendable {
     func add(_ request: UNNotificationRequest)
     func setDelegate(_ delegate: (any UNUserNotificationCenterDelegate)?)
     func requestAuthorization()
+    /// Register the action categories the app posts against. Required for the
+    /// still-recording ask: a notification whose `categoryIdentifier` names an
+    /// unregistered category still delivers, just with no buttons — a silent
+    /// downgrade that leaves the user no way to answer, and the unanswered ask
+    /// then stops their recording.
+    func setCategories(_ categories: Set<UNNotificationCategory>)
 }
 
 /// Real adapter: forwards to `UNUserNotificationCenter.current()`. Sendable (its
@@ -44,6 +50,10 @@ final class SystemNotificationScheduler: NotificationScheduling, Sendable {
 
     func setDelegate(_ delegate: (any UNUserNotificationCenterDelegate)?) {
         UNUserNotificationCenter.current().delegate = delegate
+    }
+
+    func setCategories(_ categories: Set<UNNotificationCategory>) {
+        UNUserNotificationCenter.current().setNotificationCategories(categories)
     }
 
     func requestAuthorization() {
