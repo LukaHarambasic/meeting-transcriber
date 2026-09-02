@@ -16,8 +16,14 @@ protocol RecordingSleepBlocking: AnyObject {
     func hold(reason: String)
     /// Give it back. Safe to call when nothing is held.
     func release()
-    var isHeld: Bool { get }
 }
+
+// `isHeld` is deliberately NOT a requirement here. Production only ever tells a
+// blocker what to do, never asks it anything, and the tests that do ask hold the
+// concrete `SpySleepBlocker`. As a requirement it was reachable through no call
+// site at all, which `unused_declaration` correctly flagged: a protocol should
+// require what is called through it, not everything its conformers happen to
+// expose. Both conformers still have the property.
 
 /// Production `RecordingSleepBlocking`: an IOKit power assertion of type
 /// `kIOPMAssertPreventUserIdleSystemSleep`, held from the moment a recording
@@ -55,7 +61,10 @@ final class RecordingPowerAssertion: RecordingSleepBlocking {
     }
 
     func hold(reason: String) {
-        guard assertionID == nil else { return }
+        // Through `isHeld` rather than `assertionID == nil` directly, so the
+        // protocol's idempotence contract has exactly one definition and the
+        // guard cannot drift from what the property reports.
+        guard !isHeld else { return }
         var id = IOPMAssertionID(0)
         let result = IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleSystemSleep as CFString,
