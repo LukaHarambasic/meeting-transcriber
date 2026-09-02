@@ -25,6 +25,24 @@ public enum SystemSettingsPaths {
         return "System Settings → Privacy & Security → \(pane)"
     }
 
+    /// Bundle identifier of the Privacy & Security pane in System Settings.
+    ///
+    /// The **modern** identifier, deliberately, not the widely-copied legacy
+    /// `com.apple.preference.security`. That legacy form addresses a System
+    /// *Preferences* pane that stopped existing in macOS 13 and has only worked
+    /// since through a compatibility remap — a remap with no guarantee behind
+    /// it, and one this app cannot afford to bet a button on. Checked on
+    /// macOS 26: `/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex`
+    /// reports exactly this identifier, and it has existed since macOS 13,
+    /// which is below this app's 14.2 floor — so the modern form is available
+    /// on every OS the app supports and needs no fallback.
+    ///
+    /// A dead URL would be the worst outcome here: `RecordingIssue` renders the
+    /// button only when the URL parses, so a bad *scheme* drops the button
+    /// honestly, but a well-formed URL naming a pane that no longer exists gives
+    /// the user a button that silently does nothing.
+    private static let privacyPaneID = "com.apple.settings.PrivacySecurity.extension"
+
     /// Deep link that opens the Screen Recording pane directly.
     ///
     /// Lives next to the label rather than at the call site for the same reason
@@ -34,12 +52,19 @@ public enum SystemSettingsPaths {
     /// branch. Force-unwrapping is avoided even though the literal is constant —
     /// a nil here means no button rather than a crash in the menu bar.
     public static var screenRecordingURL: URL? {
-        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        settingsURL(anchor: "Privacy_ScreenCapture")
     }
 
     /// Deep link that opens the Microphone pane directly. See
     /// ``screenRecordingURL`` for why this is a URL rather than a bare string.
     public static var microphoneURL: URL? {
-        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        settingsURL(anchor: "Privacy_Microphone")
+    }
+
+    /// Both anchors are advertised by the pane binary on macOS 26, and both
+    /// predate the app's OS floor. `internal` so a test can pin the shape
+    /// without the two public accessors having to agree by copy-paste.
+    static func settingsURL(anchor: String) -> URL? {
+        URL(string: "x-apple.systempreferences:\(privacyPaneID)?\(anchor)")
     }
 }
