@@ -391,7 +391,7 @@ final class AppState {
             transcriberState: loop?.transcriberState ?? .idle,
             activeJobState: pipeline.queue.activeJobs.first?.state,
             updateAvailable: updateChecker.availableUpdate != nil,
-            permissionProblem: permissions.health?.isHealthy == false,
+            permissionProblem: hasPermissionProblem,
         )
     }
 
@@ -403,10 +403,10 @@ final class AppState {
     }
 
     /// Whether the live permission health check currently reports a problem.
-    /// Hoisted out of the SwiftUI menu-bar body: resolving the
-    /// `permissions.health?.isHealthy == false` chain inline pushed that body's
-    /// type-check over the 300 ms budget on slower CI runners. Reading it as a
-    /// named `Bool` property keeps the body cheap.
+    /// Hoisted out of `currentBadge` for the same type-check-budget reason as
+    /// the accessors below: resolving the `permissions.health?.isHealthy ==
+    /// false` chain inline once pushed the menu-bar body over the 300 ms budget
+    /// on slower CI runners.
     var hasPermissionProblem: Bool {
         permissions.health?.isHealthy == false
     }
@@ -440,19 +440,38 @@ final class AppState {
         watching.watchLoop?.isManualRecording == true
     }
 
-    /// Menu-bar **top-half** red tint: mic channel silent, OR both channels
-    /// silent (`recordingSilentActive` paints both halves). Hoisted out of the
-    /// menu-bar body for the same type-check-budget reason as
-    /// `hasPermissionProblem` — reading two `channelHealth.*` flags through the
-    /// sub-controller inline is more than the body can afford on slow CI.
+    /// Mic channel silent, OR both channels silent (`recordingSilentActive`
+    /// counts as both). Hoisted out of the menu-bar body for the same
+    /// type-check-budget reason as `hasPermissionProblem` — reading two
+    /// `channelHealth.*` flags through the sub-controller inline is more than
+    /// the body can afford on slow CI. Also read by the RPC snapshot.
     var micSilentOverlay: Bool {
         channelHealth.micSilentOverlay
     }
 
-    /// Menu-bar **bottom-half** red tint: app-audio channel silent, OR both
-    /// channels silent. See `micSilentOverlay`.
+    /// App-audio channel silent, OR both channels silent. See `micSilentOverlay`.
     var appSilentOverlay: Bool {
         channelHealth.appSilentOverlay
+    }
+
+    /// The single problem the menu bar reports right now, or nil when there is
+    /// none. Drives both the icon's red dot and the menu's issue row, so the two
+    /// cannot disagree.
+    var currentIssue: RecordingIssue? {
+        RecordingIssue.compose(
+            permissionProblems: permissions.health?.problems ?? [],
+            recordingError: watching.watchLoop?.lastError,
+            micSilent: micSilentOverlay,
+            appSilent: appSilentOverlay,
+        )
+    }
+
+    /// Whether `currentIssue` is non-nil. A named `Bool` because the menu-bar
+    /// scene body needs the predicate and not the value, and resolving the
+    /// optional through the composer inline is exactly the kind of expression
+    /// that pushed that body over its 300 ms type-check budget before.
+    var hasIssue: Bool {
+        currentIssue != nil
     }
 
     // Internal (not private): also formats `postedAt` in the RPC snapshot

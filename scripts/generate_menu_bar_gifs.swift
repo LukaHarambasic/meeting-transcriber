@@ -32,14 +32,15 @@ func textLayout(in rect: NSRect) -> (top: CGFloat, left: CGFloat) {
 
 // MARK: - Drawing Functions
 
-let recordingFrames: [[CGFloat]] = [
-    [0.25, 0.50, 0.75, 0.45, 0.30],
-    [0.40, 0.30, 0.65, 0.70, 0.25],
-    [0.20, 0.60, 0.40, 0.55, 0.50],
-    [0.50, 0.45, 0.70, 0.25, 0.40],
-    [0.30, 0.65, 0.50, 0.60, 0.20],
-    [0.45, 0.35, 0.55, 0.40, 0.65],
-]
+// Mirrors `MenuBarIcon.recordingBarHeight(bar:frame:)` — a wave travelling
+// across the bars, replacing the six hand-written random-looking height rows
+// that read as jitter at 18pt.
+func recordingBarHeight(bar: Int, frame: Int) -> CGFloat {
+    let framePhase = 2 * CGFloat.pi * CGFloat(frame % frameCount) / CGFloat(frameCount)
+    let barPhase = 2 * CGFloat.pi * CGFloat(bar) / CGFloat(barCount)
+    let unit = (sin(framePhase + barPhase) + 1) / 2
+    return 0.30 + 0.40 * unit
+}
 
 func drawIdle(in rect: NSRect) {
     let layout = barsLayout(in: rect)
@@ -52,7 +53,7 @@ func drawIdle(in rect: NSRect) {
 }
 
 func drawRecording(in rect: NSRect, frame: Int) {
-    let heights = recordingFrames[frame % recordingFrames.count]
+    let heights = (0 ..< barCount).map { recordingBarHeight(bar: $0, frame: frame) }
     let layout = barsLayout(in: rect)
     for i in 0 ..< barCount {
         let x = layout.left + CGFloat(i) * barSpacing
@@ -132,59 +133,13 @@ func drawProtocol(in rect: NSRect, frame: Int) {
     }
 }
 
-// Red circle with white "!" in the bottom-right corner.
-// Mirrors MenuBarIcon.drawExclamationBadge — used for the permission-problem overlay.
-func drawExclamationBadge(in rect: NSRect) {
-    let size: CGFloat = 7.0
-    let margin: CGFloat = 0.5
-    let cx = rect.maxX - size / 2 - margin
-    let cy = rect.minY + size / 2 + margin
-
-    NSColor.systemRed.setFill()
-    NSBezierPath(
-        ovalIn: NSRect(x: cx - size / 2, y: cy - size / 2, width: size, height: size),
-    ).fill()
-
-    NSColor.white.setFill()
-
-    let stemW: CGFloat = 1.3
-    let stemH: CGFloat = 2.8
-    let stemY = cy + size / 2 - 1.8 - stemH
-    NSBezierPath(
-        roundedRect: NSRect(x: cx - stemW / 2, y: stemY, width: stemW, height: stemH),
-        xRadius: stemW / 2, yRadius: stemW / 2,
-    ).fill()
-
-    let dotSize: CGFloat = 1.3
-    let dotY = cy - size / 2 + 1.0
-    NSBezierPath(ovalIn: NSRect(x: cx - dotSize / 2, y: dotY, width: dotSize, height: dotSize)).fill()
-}
-
-// Tint the top or bottom half of the icon red — mirrors
-// `MenuBarIcon.drawTintedHalf`. Caller passes the body draw closure;
-// we save graphics state, clip to the requested half, set red fill,
-// run the body, restore. The +0.5 fudge closes the AA seam on the
-// center line, matching the production implementation.
-enum Half { case top, bottom }
-
-func drawTintedHalf(in rect: NSRect, half: Half, body: () -> Void) {
-    guard let ctx = NSGraphicsContext.current else { return }
-    ctx.saveGraphicsState()
-    defer { ctx.restoreGraphicsState() }
-    let centerY = rect.height / 2
-    let clip = switch half {
-    case .top: NSRect(x: 0, y: centerY - 0.5, width: rect.width, height: rect.height - centerY + 0.5)
-    case .bottom: NSRect(x: 0, y: 0, width: rect.width, height: centerY + 0.5)
-    }
-    NSBezierPath(rect: clip).setClip()
-    NSColor.systemRed.setFill()
-    body()
-}
-
-// Plain red dot in the bottom-right corner (no exclamation glyph).
-// Mirrors MenuBarIcon.drawRecordOnlyBadge — used for the record-only overlay.
-func drawRecordOnlyBadge(in rect: NSRect) {
-    let size: CGFloat = 5.0
+// Plain red dot in the bottom-right corner. Mirrors `MenuBarIcon.drawErrorDot`
+// — the icon's only coloured mark, and the only one left: the exclamation
+// badge, the record-only dot and the per-channel half-tints were all removed
+// so every non-error state can stay a template image that inverts for light,
+// dark, and the open-menu highlight.
+func drawErrorDot(in rect: NSRect) {
+    let size: CGFloat = 6.0
     let margin: CGFloat = 0.5
     let cx = rect.maxX - size / 2 - margin
     let cy = rect.minY + size / 2 + margin
@@ -291,44 +246,27 @@ writeGIF(name: "menu-bar-diarizing.gif", frames: diarFrames)
 let protoFrames = (0 ..< frameCount).map { i in renderFrame { drawProtocol(in: $0, frame: i) } }
 writeGIF(name: "menu-bar-protocol.gif", frames: protoFrames)
 
-// Permission problem (static: idle waveform with red exclamation badge overlay).
-// Shown whenever Mic, Screen Recording, or Accessibility is denied or broken.
-let permissionFrame = renderFrame { rect in
+// Error while idle (static: idle waveform with the red dot).
+// Shown whenever `AppState.currentIssue` is non-nil and nothing is recording —
+// a denied grant, or the failure the last recording ended with. The menu names
+// which one; the dot only says that there is one.
+let idleErrorFrame = renderFrame { rect in
     drawIdle(in: rect)
-    drawExclamationBadge(in: rect)
+    drawErrorDot(in: rect)
 }
 
-writeGIF(name: "menu-bar-permission.gif", frames: [permissionFrame, permissionFrame], delay: 1.0)
+writeGIF(name: "menu-bar-error.gif", frames: [idleErrorFrame, idleErrorFrame], delay: 1.0)
 
-// Record-only mode (static: idle waveform with red dot overlay).
-// Shown while watching when AppSettings.recordOnly is enabled.
-let recordOnlyFrame = renderFrame { rect in
-    drawIdle(in: rect)
-    drawRecordOnlyBadge(in: rect)
-}
-
-writeGIF(name: "menu-bar-record-only.gif", frames: [recordOnlyFrame, recordOnlyFrame], delay: 1.0)
-
-// Channel-silent (app-audio dead): recording animation with the bottom
-// half of the waveform tinted red — same overlay path
-// `MenuBarIcon.image(..., appSilentOverlay:)` uses in production.
-let appSilentFrames = (0 ..< frameCount).map { i in
+// Error while recording: the wave keeps travelling under the dot, so a live
+// recording that hit a problem (a dead capture channel) does not read as one
+// that stopped.
+let recordingErrorFrames = (0 ..< frameCount).map { i in
     renderFrame { rect in
         drawRecording(in: rect, frame: i)
-        drawTintedHalf(in: rect, half: .bottom) { drawRecording(in: rect, frame: i) }
+        drawErrorDot(in: rect)
     }
 }
 
-writeGIF(name: "menu-bar-channel-silent-app.gif", frames: appSilentFrames)
-
-// Channel-silent (mic dead): same animation, top half tinted red.
-let micSilentFrames = (0 ..< frameCount).map { i in
-    renderFrame { rect in
-        drawRecording(in: rect, frame: i)
-        drawTintedHalf(in: rect, half: .top) { drawRecording(in: rect, frame: i) }
-    }
-}
-
-writeGIF(name: "menu-bar-channel-silent-mic.gif", frames: micSilentFrames)
+writeGIF(name: "menu-bar-error-recording.gif", frames: recordingErrorFrames)
 
 print("Done!")

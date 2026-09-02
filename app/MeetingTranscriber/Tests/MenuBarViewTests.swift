@@ -31,6 +31,7 @@ final class MenuBarViewTests: XCTestCase {
 
     private func makeView(
         status: TranscriberStatus? = nil,
+        issue: RecordingIssue? = nil,
         pipelineQueue: PipelineQueue? = nil,
         updateChecker: UpdateChecker? = nil,
         onNameSpeakers: (() -> Void)? = nil,
@@ -40,6 +41,7 @@ final class MenuBarViewTests: XCTestCase {
     ) -> MenuBarView {
         MenuBarView(
             status: status,
+            issue: issue,
             pipelineQueue: pipelineQueue ?? PipelineQueue(),
             updateChecker: updateChecker,
             onRecordMeeting: onRecordMeeting,
@@ -71,18 +73,52 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertThrowsError(try body.find(text: "Standup"))
     }
 
-    // MARK: - Error display
+    // MARK: - Issue display
 
-    func testErrorShownWhenErrorState() throws {
-        let sut = makeView(status: makeStatus(state: .error, error: "Python crashed"))
+    func testIssueHeadlineAndDetailShown() throws {
+        let issue = RecordingIssue(
+            headline: "Screen Recording permission denied",
+            detail: "Recording is refused without it.",
+            remedy: .openScreenRecording,
+        )
+        let sut = makeView(status: nil, issue: issue)
         let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Python crashed"))
+        XCTAssertNoThrow(try body.find(text: "Screen Recording permission denied"))
+        XCTAssertNoThrow(try body.find(text: "Recording is refused without it."))
     }
 
-    func testErrorHiddenWhenNotErrorState() throws {
-        let sut = makeView(status: makeStatus(state: .recording, error: "stale error"))
+    /// The regression the whole issue row exists for: the problem has to show
+    /// while *nothing* is recording, because that is exactly when a refused
+    /// start leaves the user with a red icon and the word "Idle". `status` is nil
+    /// here — the old error row read `status?.error` and so could never fire.
+    func testIssueShownWithNoActiveStatus() throws {
+        let issue = RecordingIssue(headline: "Boom", detail: "Details", remedy: nil)
+        let sut = makeView(status: nil, issue: issue)
         let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(text: "stale error"))
+        XCTAssertNoThrow(try body.find(text: "Boom"))
+    }
+
+    func testNoIssueMeansNoIssueRow() throws {
+        let sut = makeView(status: makeStatus(state: .idle), issue: nil)
+        let body = try sut.inspect()
+        XCTAssertThrowsError(try body.find(text: "Boom"))
+    }
+
+    func testRemedyButtonShownForPermissionIssue() throws {
+        let issue = RecordingIssue(headline: "Denied", detail: "Detail", remedy: .openScreenRecording)
+        let sut = makeView(status: nil, issue: issue)
+        let body = try sut.inspect()
+        XCTAssertNoThrow(try body.find(button: RecordingIssue.Remedy.openScreenRecording.buttonTitle))
+    }
+
+    func testRemedyButtonAbsentWhenNoPaneWouldHelp() throws {
+        let issue = RecordingIssue(headline: "Last recording failed", detail: "Disk full", remedy: nil)
+        let sut = makeView(status: nil, issue: issue)
+        let body = try sut.inspect()
+        XCTAssertNoThrow(try body.find(text: "Disk full"))
+        XCTAssertThrowsError(
+            try body.find(button: RecordingIssue.Remedy.openScreenRecording.buttonTitle),
+        )
     }
 
     // MARK: - Name Speakers button
@@ -178,6 +214,7 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
+            issue: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -201,6 +238,7 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
+            issue: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -224,6 +262,7 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
+            issue: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -247,6 +286,7 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .protocolReady, protocolPath: "/tmp/p.md"),
+            issue: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -270,6 +310,7 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .waitingForSpeakerNames),
+            issue: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -329,6 +370,7 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: queue,
             updateChecker: nil,
             onRecordMeeting: {},
@@ -364,6 +406,7 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: queue,
             updateChecker: nil,
             onRecordMeeting: {},
@@ -386,6 +429,7 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -421,6 +465,7 @@ final class MenuBarViewTests: XCTestCase {
         var dismissedID: UUID?
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: queue,
             updateChecker: nil,
             onRecordMeeting: {},
@@ -455,6 +500,7 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: queue,
             updateChecker: nil,
             onRecordMeeting: {},
@@ -491,6 +537,7 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: queue,
             updateChecker: nil,
             onRecordMeeting: {},
@@ -528,6 +575,7 @@ final class MenuBarViewTests: XCTestCase {
         var called = false
         let sut = MenuBarView(
             status: makeStatus(state: .recording),
+            issue: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -601,6 +649,7 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: queue,
             updateChecker: nil,
             onRecordMeeting: {},
@@ -738,6 +787,7 @@ final class MenuBarViewTests: XCTestCase {
 
         let sut = MenuBarView(
             status: makeStatus(),
+            issue: nil,
             pipelineQueue: queue,
             updateChecker: nil,
             onRecordMeeting: {},

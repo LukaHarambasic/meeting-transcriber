@@ -15,10 +15,10 @@ extension Notification.Name {
 /// every open Window.
 private struct AnimatedMenuBarIcon: View {
     let badge: BadgeKind
-    let permissionOverlay: Bool
-    let recordOnlyOverlay: Bool
-    let micSilentOverlay: Bool
-    let appSilentOverlay: Bool
+    /// Whether to composite the red error dot. One flag, not the four overlay
+    /// inputs this replaces — see `MenuBarIcon` for why colour is now reserved
+    /// for a single meaning.
+    let errorOverlay: Bool
 
     @State private var animationFrame = 0
     // `.default` (not `.common`) so the timer never fires inside the status-bar
@@ -31,10 +31,7 @@ private struct AnimatedMenuBarIcon: View {
         Image(nsImage: MenuBarIcon.image(
             badge: badge,
             animationFrame: animationFrame,
-            permissionOverlay: permissionOverlay,
-            recordOnlyOverlay: recordOnlyOverlay,
-            micSilentOverlay: micSilentOverlay,
-            appSilentOverlay: appSilentOverlay,
+            errorOverlay: errorOverlay,
         ))
         .onReceive(iconTimer) { _ in
             let next = MenuBarIcon.nextFrame(animationFrame, badge: badge)
@@ -89,6 +86,7 @@ struct MeetingTranscriberApp: App {
         MenuBarExtra {
             MenuBarView(
                 status: appState.currentStatus,
+                issue: appState.currentIssue,
                 pipelineQueue: appState.pipelineQueue,
                 updateChecker: appState.updateChecker,
                 onRecordMeeting: { appState.watching.startMeetingRecording() },
@@ -115,13 +113,11 @@ struct MeetingTranscriberApp: App {
             } icon: {
                 AnimatedMenuBarIcon(
                     badge: appState.currentBadge,
-                    permissionOverlay: appState.hasPermissionProblem,
-                    recordOnlyOverlay: appState.settings.recordOnly,
-                    // `recordingSilentActive` paints both halves; folded into the
-                    // hoisted overlay props so MenuBarIcon only needs the two
-                    // per-channel overlay inputs.
-                    micSilentOverlay: appState.micSilentOverlay,
-                    appSilentOverlay: appState.appSilentOverlay,
+                    // The dot and the menu's issue row read the same
+                    // `currentIssue`, so the icon can never show a problem the
+                    // menu declines to name — the failure that sent the user
+                    // looking at a red mark next to the word "Idle".
+                    errorOverlay: appState.hasIssue,
                 )
             }
             .onReceive(NotificationCenter.default.publisher(for: .showSpeakerNaming)) { _ in

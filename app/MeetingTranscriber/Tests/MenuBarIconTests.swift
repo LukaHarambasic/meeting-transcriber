@@ -14,98 +14,124 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertEqual(image.size.height, 18, accuracy: 0.01)
     }
 
-    func testRecordOnlyOverlayProducesNonTemplateImageOverAnyBadge() {
+    // MARK: - Error overlay (the icon's only use of colour)
+
+    /// The load-bearing half of the adaptive-icon change: with no problem, every
+    /// state — including `.error`, which used to paint its own red exclamation —
+    /// must be a template image, or macOS will not invert it for a dark menu bar
+    /// or for the highlight the status item gets while its menu is open. A black
+    /// waveform sitting on that blue highlight is what the user reported.
+    func testEveryBadgeIsTemplateWithoutTheErrorOverlay() {
         for badge in BadgeKind.allCases {
-            let image = MenuBarIcon.image(badge: badge, recordOnlyOverlay: true)
+            let image = MenuBarIcon.image(badge: badge)
+            XCTAssertTrue(
+                image.isTemplate,
+                "Badge \(badge) must be a template image so macOS adapts it to the menu bar",
+            )
+            XCTAssertEqual(image.size.width, 18, accuracy: 0.01, "Badge \(badge) width")
+            XCTAssertEqual(image.size.height, 18, accuracy: 0.01, "Badge \(badge) height")
+        }
+    }
+
+    func testErrorOverlayProducesNonTemplateImageOverAnyBadge() {
+        for badge in BadgeKind.allCases {
+            let image = MenuBarIcon.image(badge: badge, errorOverlay: true)
             XCTAssertFalse(
                 image.isTemplate,
-                "record-only overlay must be non-template for \(badge) so the red dot stays red",
+                "error overlay must be non-template for \(badge) so the red dot stays red",
             )
         }
     }
 
-    func testRecordOnlyOverlayDefaultsOffStaysTemplate() {
-        let image = MenuBarIcon.image(badge: .recording)
-        XCTAssertTrue(image.isTemplate, "without overlay flag, default rendering stays template")
+    func testErrorOverlayChangesTheRenderedImage() {
+        let plain = MenuBarIcon.image(badge: .inactive, animationFrame: 0)
+        let dotted = MenuBarIcon.image(badge: .inactive, animationFrame: 0, errorOverlay: true)
+        XCTAssertNotEqual(
+            plain.tiffRepresentation,
+            dotted.tiffRepresentation,
+            "the red dot has to actually be drawn, not just flip isTemplate",
+        )
     }
 
-    /// Regression test: when a non-animated badge (e.g. `.inactive`) is rendered with the
-    /// record-only overlay, it must NOT pick up the live `animationFrame` — otherwise the
-    /// idle waveform bounces as if recording. See MenuBarIcon.image(...) frame-clamp logic.
-    func testRecordOnlyOverlayDoesNotAnimateStaticBadges() {
+    func testErrorOverlayDefaultsOff() {
+        let withoutParam = MenuBarIcon.image(badge: .recording, animationFrame: 0)
+        let explicitFalse = MenuBarIcon.image(badge: .recording, animationFrame: 0, errorOverlay: false)
+        XCTAssertEqual(withoutParam.isTemplate, explicitFalse.isTemplate)
+        XCTAssertEqual(withoutParam.tiffRepresentation, explicitFalse.tiffRepresentation)
+    }
+
+    /// Regression test: a non-animated badge rendered with the error overlay must
+    /// NOT pick up the live `animationFrame` — otherwise the idle waveform
+    /// bounces as if recording. See MenuBarIcon.image(...) frame-clamp logic.
+    func testErrorOverlayDoesNotAnimateStaticBadges() {
         let staticBadges: [BadgeKind] = [.inactive, .userAction, .done, .error, .updateAvailable]
         for badge in staticBadges {
-            let frame0 = MenuBarIcon.image(badge: badge, animationFrame: 0, recordOnlyOverlay: true)
-            let frame3 = MenuBarIcon.image(badge: badge, animationFrame: 3, recordOnlyOverlay: true)
+            let frame0 = MenuBarIcon.image(badge: badge, animationFrame: 0, errorOverlay: true)
+            let frame3 = MenuBarIcon.image(badge: badge, animationFrame: 3, errorOverlay: true)
             XCTAssertEqual(
                 frame0.tiffRepresentation,
                 frame3.tiffRepresentation,
-                "Static badge \(badge) should render identically across frames under recordOnlyOverlay",
+                "Static badge \(badge) should render identically across frames under errorOverlay",
             )
         }
     }
 
-    /// Inverse check: animated badges (e.g. `.recording`) MUST advance their frame under the
-    /// overlay — otherwise the live waveform bounce is killed when record-only is enabled.
-    func testRecordOnlyOverlayKeepsAnimatedBadgesAnimating() {
+    /// Inverse check, and a requirement in its own right: a recording that hits a
+    /// problem keeps animating *under* the dot. Freezing it would say "recording
+    /// stopped" about a recording that is still running.
+    func testErrorOverlayKeepsAnimatedBadgesAnimating() {
         let animatedBadges: [BadgeKind] = [.recording, .transcribing, .diarizing, .processing]
         for badge in animatedBadges {
-            let frame0 = MenuBarIcon.image(badge: badge, animationFrame: 0, recordOnlyOverlay: true)
-            let frame3 = MenuBarIcon.image(badge: badge, animationFrame: 3, recordOnlyOverlay: true)
+            let frame0 = MenuBarIcon.image(badge: badge, animationFrame: 0, errorOverlay: true)
+            let frame3 = MenuBarIcon.image(badge: badge, animationFrame: 3, errorOverlay: true)
             XCTAssertNotEqual(
                 frame0.tiffRepresentation,
                 frame3.tiffRepresentation,
-                "Animated badge \(badge) should advance under recordOnlyOverlay",
+                "Animated badge \(badge) should advance under errorOverlay",
             )
         }
     }
 
-    // MARK: - Per-channel silence overlay
+    // MARK: - Recording animation shape
 
-    func testMicSilentOverlayProducesNonTemplateImage() {
-        for badge in BadgeKind.allCases {
-            let image = MenuBarIcon.image(badge: badge, micSilentOverlay: true)
-            XCTAssertFalse(image.isTemplate, "mic-silent overlay must be non-template for \(badge)")
-        }
+    /// The wave has to actually travel: every bar at a different height on a
+    /// given frame, and each bar's height changing frame to frame. A constant
+    /// would satisfy "renders an image" and animate nothing.
+    func testRecordingWaveTravelsAcrossBarsAndFrames() {
+        let frame0 = (0 ..< 5).map { MenuBarIcon.recordingBarHeight(bar: $0, frame: 0) }
+        XCTAssertGreaterThan(
+            Set(frame0.map { ($0 * 1000).rounded() }).count, 1,
+            "bars on one frame must differ, or the icon is five identical bars",
+        )
+        let bar0 = (0 ..< MenuBarIcon.frameCount).map { MenuBarIcon.recordingBarHeight(bar: 0, frame: $0) }
+        XCTAssertGreaterThan(
+            Set(bar0.map { ($0 * 1000).rounded() }).count, 1,
+            "one bar across frames must differ, or nothing moves",
+        )
     }
 
-    func testAppSilentOverlayProducesNonTemplateImage() {
-        for badge in BadgeKind.allCases {
-            let image = MenuBarIcon.image(badge: badge, appSilentOverlay: true)
-            XCTAssertFalse(image.isTemplate, "app-silent overlay must be non-template for \(badge)")
-        }
-    }
-
-    func testChannelOverlaysDefaultOff() {
-        let image = MenuBarIcon.image(badge: .recording)
-        XCTAssertTrue(image.isTemplate, "without overlay flag, recording stays template")
-    }
-
-    func testMicAndAppSilentRenderDistinctImages() {
-        let micRed = MenuBarIcon.image(badge: .recording, animationFrame: 0, micSilentOverlay: true)
-        let appRed = MenuBarIcon.image(badge: .recording, animationFrame: 0, appSilentOverlay: true)
-        let bothRed = MenuBarIcon.image(badge: .recording, animationFrame: 0, micSilentOverlay: true, appSilentOverlay: true)
-        let normal = MenuBarIcon.image(badge: .recording, animationFrame: 0)
-        XCTAssertNotEqual(micRed.tiffRepresentation, normal.tiffRepresentation)
-        XCTAssertNotEqual(appRed.tiffRepresentation, normal.tiffRepresentation)
-        XCTAssertNotEqual(micRed.tiffRepresentation, appRed.tiffRepresentation, "top-half and bottom-half tint must differ")
-        XCTAssertNotEqual(bothRed.tiffRepresentation, micRed.tiffRepresentation)
-        XCTAssertNotEqual(bothRed.tiffRepresentation, appRed.tiffRepresentation)
-    }
-
-    func testAllBadgeKindsProduceValidImages() {
-        // Badges that paint a colored mark (red dot / exclamation) must stay non-template
-        // so the color survives macOS's monochrome template tinting.
-        let nonTemplateBadges: Set<BadgeKind> = [.error]
-        for badge in BadgeKind.allCases {
-            let image = MenuBarIcon.image(badge: badge)
-            if nonTemplateBadges.contains(badge) {
-                XCTAssertFalse(image.isTemplate, "Badge \(badge) should be non-template (colored)")
-            } else {
-                XCTAssertTrue(image.isTemplate, "Badge \(badge) should produce a template image")
+    /// Amplitude bounds, so no frame clips the icon or collapses a bar to
+    /// nothing. Checked over two full cycles to also pin the frame wrap.
+    func testRecordingWaveStaysWithinItsAmplitudeBounds() {
+        for frame in 0 ..< (MenuBarIcon.frameCount * 2) {
+            for bar in 0 ..< 5 {
+                let height = MenuBarIcon.recordingBarHeight(bar: bar, frame: frame)
+                XCTAssertGreaterThanOrEqual(height, 0.30, "bar \(bar) frame \(frame) too short")
+                XCTAssertLessThanOrEqual(height, 0.70, "bar \(bar) frame \(frame) would clip")
             }
-            XCTAssertEqual(image.size.width, 18, accuracy: 0.01, "Badge \(badge) width")
-            XCTAssertEqual(image.size.height, 18, accuracy: 0.01, "Badge \(badge) height")
+        }
+    }
+
+    /// The cycle closes: frame `frameCount` renders as frame 0, so the animation
+    /// loops without a visible jump.
+    func testRecordingWaveLoopsSeamlessly() {
+        for bar in 0 ..< 5 {
+            XCTAssertEqual(
+                MenuBarIcon.recordingBarHeight(bar: bar, frame: 0),
+                MenuBarIcon.recordingBarHeight(bar: bar, frame: MenuBarIcon.frameCount),
+                accuracy: 0.0001,
+                "bar \(bar) jumps at the loop boundary",
+            )
         }
     }
 
@@ -141,28 +167,12 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertEqual(normal.size, wrapped.size)
     }
 
-    // MARK: - Permission Overlay
-
-    func testPermissionOverlayIsNonTemplate() {
-        // Recording is normally a template image — with the overlay it must become non-template
-        // because the red exclamation dot can't be monochrome.
-        let image = MenuBarIcon.image(badge: .recording, animationFrame: 0, permissionOverlay: true)
-        XCTAssertFalse(image.isTemplate)
-    }
-
-    func testPermissionOverlayAppliesToAllActiveBadges() {
+    func testErrorOverlayKeepsImageSize() {
         for badge in BadgeKind.allCases {
-            let image = MenuBarIcon.image(badge: badge, animationFrame: 0, permissionOverlay: true)
-            XCTAssertFalse(image.isTemplate, "Overlay on \(badge) should be non-template")
+            let image = MenuBarIcon.image(badge: badge, animationFrame: 0, errorOverlay: true)
             XCTAssertEqual(image.size.width, 18, accuracy: 0.01)
             XCTAssertEqual(image.size.height, 18, accuracy: 0.01)
         }
-    }
-
-    func testPermissionOverlayDefaultsToFalse() {
-        let withoutParam = MenuBarIcon.image(badge: .recording, animationFrame: 0)
-        let explicitFalse = MenuBarIcon.image(badge: .recording, animationFrame: 0, permissionOverlay: false)
-        XCTAssertEqual(withoutParam.isTemplate, explicitFalse.isTemplate)
     }
 
     func testLargeAnimationFrameDoesNotCrash() {

@@ -32,14 +32,25 @@ enum BadgeKind: String, CaseIterable, Codable {
     }
 }
 
-/// Composites a menu bar icon (waveform + optional badge overlay).
+/// Composites a menu bar icon (waveform + optional red error dot).
 ///
 /// The base icon is a waveform (5 vertical bars). Depending on the badge kind,
 /// the waveform animates differently:
-/// - `.recording`: bars bounce like a live audio signal
+/// - `.recording`: a wave travels across the bars
 /// - `.transcribing`: bars morph into horizontal text lines (audio → text)
 /// - `.diarizing`: bars split into two groups (speaker separation)
 /// - `.processing`: text lines appear sequentially (protocol being written)
+///
+/// **Colour is reserved for exactly one thing: an error.** Everything else is a
+/// template image, so macOS inverts it for light and dark menu bars and for the
+/// highlight the status item gets while its menu is open, the way every other
+/// menu-bar icon behaves. Three earlier red marks — a record-only dot, a
+/// permission exclamation, and per-channel half-tinted bars — each forced a
+/// non-template image, and a non-template image does not invert: the icon stayed
+/// black-on-blue under the open-menu highlight, and a permanent red mark that
+/// was never explained anywhere in the UI read as decoration rather than as a
+/// problem. The one remaining red mark is `errorOverlay`, and the menu shows the
+/// matching `RecordingIssue` text whenever it is set.
 ///
 /// Rendered as template image — macOS handles light/dark mode automatically.
 /// `@MainActor` because cache initialisation, NSApp / NSAppearance reads, and
@@ -116,33 +127,26 @@ enum MenuBarIcon {
 
     /// Returns a pre-rendered 18x18pt template `NSImage` for the given badge and animation frame.
     ///
-    /// If `permissionOverlay` or `recordOnlyOverlay` is true, a red badge is composited over
-    /// the base icon. If `micSilentOverlay` is true, the **top half** of the waveform bars is
-    /// filled in red — signalling the mic channel went silent. If `appSilentOverlay` is true,
-    /// the **bottom half** is red — signalling the app-audio channel went silent. The two are
-    /// independent; if both are true, both halves are red (effectively all-red bars).
-    /// Any of these bypass the pre-rendered cache and force a non-template image, because red
-    /// would not survive template rendering.
+    /// `errorOverlay` composites a solid red dot in the bottom-right corner and
+    /// is the icon's only use of colour. It bypasses the pre-rendered cache and
+    /// forces a non-template image, because red would not survive template
+    /// rendering — and it is rendered per call rather than cached so it picks up
+    /// a light/dark switch that happened after launch.
+    ///
+    /// The badge body still animates underneath the dot: a recording that hits a
+    /// problem keeps moving *and* shows the dot, rather than freezing into a
+    /// static error icon that reads as "recording stopped".
     static func image(
         badge: BadgeKind,
         animationFrame: Int = 0,
-        permissionOverlay: Bool = false,
-        recordOnlyOverlay: Bool = false,
-        micSilentOverlay: Bool = false,
-        appSilentOverlay: Bool = false,
+        errorOverlay: Bool = false,
     ) -> NSImage {
-        if permissionOverlay || recordOnlyOverlay || micSilentOverlay || appSilentOverlay {
+        if errorOverlay {
             // Honour the cache's frame discipline: animated badges advance, static ones
             // stay on frame 0. Without this, the live animationFrame leaks through and
             // makes `.inactive` (idle waveform) bounce as if recording.
             let frame = badge.isAnimated ? animationFrame : 0
-            return renderImage(
-                badge: badge, frame: frame,
-                permissionOverlay: permissionOverlay,
-                recordOnlyOverlay: recordOnlyOverlay,
-                micSilentOverlay: micSilentOverlay,
-                appSilentOverlay: appSilentOverlay,
-            )
+            return renderImage(badge: badge, frame: frame, errorOverlay: true)
         }
         guard let frames = cache[badge] else { return renderImage(badge: badge, frame: animationFrame) }
         return frames[animationFrame % frames.count]
@@ -153,29 +157,22 @@ enum MenuBarIcon {
     private static func renderImage(
         badge: BadgeKind,
         frame: Int,
-        permissionOverlay: Bool = false,
-        recordOnlyOverlay: Bool = false,
-        micSilentOverlay: Bool = false,
-        appSilentOverlay: Bool = false,
+        errorOverlay: Bool = false,
     ) -> NSImage {
         let size = NSSize(width: 18, height: 18)
-        // The `.error` badge and any red overlay all need an explicit foreground color
-        // (matching the menu bar appearance), because the image is non-template (red marks
-        // must stay red in both light and dark mode).
-        let needsExplicitForeground = badge == .error
-            || permissionOverlay
-            || recordOnlyOverlay
-            || micSilentOverlay
-            || appSilentOverlay
         // Snapshot the dark-mode appearance on the calling thread (the cache
-        // builder runs at type init on the main thread; ad-hoc overlay
-        // renders also originate from `image(badge:…)` on MainActor). The
-        // NSImage closure can be invoked off-main during composition, so
-        // we cannot read NSApp from inside it under Swift 6.
+        // builder runs at type init on the main thread; ad-hoc error renders
+        // also originate from `image(badge:…)` on MainActor). The NSImage
+        // closure can be invoked off-main during composition, so we cannot read
+        // NSApp from inside it under Swift 6.
+        //
+        // Only the error render consults it. A template image needs no
+        // foreground colour at all — AppKit derives one — so every other badge
+        // is appearance-independent and safe to cache once at launch.
         let isDark = NSApp?.effectiveAppearance
             .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let image = NSImage(size: size, flipped: false) { rect in
-            if needsExplicitForeground {
+            if errorOverlay {
                 (isDark ? NSColor.white : NSColor.black).setFill()
             } else {
                 NSColor.black.setFill()
@@ -183,38 +180,29 @@ enum MenuBarIcon {
 
             drawBadgeBody(badge: badge, in: rect, frame: frame)
 
-            // Tint halves AFTER the base body is drawn. Clipping to the upper /
-            // lower half + repainting the same body with red fill overlays the
-            // tint without altering bar geometry — clean per-channel signal.
-            if micSilentOverlay {
-                drawTintedHalf(in: rect, half: .top) {
-                    drawBadgeBody(badge: badge, in: rect, frame: frame)
-                }
-            }
-            if appSilentOverlay {
-                drawTintedHalf(in: rect, half: .bottom) {
-                    drawBadgeBody(badge: badge, in: rect, frame: frame)
-                }
-            }
-
-            // Overlay precedence: permission errors win over record-only because a permission
-            // problem actually breaks recording, so the user must see it first.
-            if permissionOverlay || badge == .error {
-                drawExclamationBadge(in: rect)
-            } else if recordOnlyOverlay {
-                drawRecordOnlyBadge(in: rect)
+            if errorOverlay {
+                drawErrorDot(in: rect)
             }
 
             return true
         }
-        image.isTemplate = !needsExplicitForeground
+        image.isTemplate = !errorOverlay
         return image
     }
 
-    /// Single dispatch for the badge's main body shape. Extracted so the
-    /// per-half tint pass can re-draw the same body under a clip rect.
+    /// Single dispatch for the badge's main body shape.
+    ///
+    /// Every non-animated badge draws `drawStaticBars`, i.e. `defaultBarHeights`
+    /// — which is also the shape the transcribing morph interpolates *from*, so
+    /// idle → transcribing starts where idle left off instead of jumping. The
+    /// old code drew `recordingFrames[0]` here, which happened to equal
+    /// `defaultBarHeights`; with the recording wave now computed rather than
+    /// tabulated that coincidence is gone, so the static shape is named.
     private static func drawBadgeBody(badge: BadgeKind, in rect: NSRect, frame: Int) {
         switch badge {
+        case .recording:
+            drawRecordingAnimation(in: rect, frame: frame)
+
         case .transcribing:
             drawTranscribingAnimation(in: rect, frame: frame)
 
@@ -224,53 +212,52 @@ enum MenuBarIcon {
         case .processing:
             drawProtocolAnimation(in: rect, frame: frame)
 
-        case .error:
-            drawRecordingAnimation(in: rect, frame: 0)
-
         case .updateAvailable:
-            drawRecordingAnimation(in: rect, frame: 0)
+            drawStaticBars(in: rect)
             drawUpdateArrow(in: rect)
 
-        default:
-            drawRecordingAnimation(in: rect, frame: frame)
+        case .inactive, .userAction, .done, .error:
+            drawStaticBars(in: rect)
         }
     }
 
-    private enum Half { case top, bottom }
-
-    /// Save graphics state, clip to the top or bottom half of `rect`, set red
-    /// fill, run `body`, restore. The +0.5 fudge factor closes the antialiasing
-    /// seam at the exact center line.
-    private static func drawTintedHalf(in rect: NSRect, half: Half, body: () -> Void) {
-        guard let ctx = NSGraphicsContext.current else { return }
-        ctx.saveGraphicsState()
-        defer { ctx.restoreGraphicsState() }
-        let centerY = rect.height / 2
-        let clip = switch half {
-        case .top: NSRect(x: 0, y: centerY - 0.5, width: rect.width, height: rect.height - centerY + 0.5)
-        case .bottom: NSRect(x: 0, y: 0, width: rect.width, height: centerY + 0.5)
-        }
-        NSBezierPath(rect: clip).setClip()
-        NSColor.systemRed.setFill()
-        body()
+    /// The resting waveform: five bars at `defaultBarHeights`. Drawn for every
+    /// badge that does not animate.
+    private static func drawStaticBars(in rect: NSRect) {
+        drawBars(in: rect, heights: defaultBarHeights)
     }
 
-    // MARK: - Recording Animation (bouncing waveform)
+    // MARK: - Recording Animation (a wave travelling across the bars)
 
-    private static let recordingFrames: [[CGFloat]] = [
-        [0.25, 0.50, 0.75, 0.45, 0.30],
-        [0.40, 0.30, 0.65, 0.70, 0.25],
-        [0.20, 0.60, 0.40, 0.55, 0.50],
-        [0.50, 0.45, 0.70, 0.25, 0.40],
-        [0.30, 0.65, 0.50, 0.60, 0.20],
-        [0.45, 0.35, 0.55, 0.40, 0.65],
-    ]
+    /// Bar height as a fraction of the icon, for one bar on one frame.
+    ///
+    /// A sine wave rather than the six hand-written height rows this replaces.
+    /// Those rows were random-looking by design — "bars bounce like a live audio
+    /// signal" — and at 18pt and 2.5 frames a second the result read as jitter
+    /// rather than as sound. One wave phase spread across the five bars and
+    /// advanced by one frame per tick gives a calm, obviously-periodic motion
+    /// that says "running" without competing for attention, and it loops
+    /// seamlessly for any `frameCount` because both offsets are full turns.
+    ///
+    /// Amplitude stops well short of the icon's edges (0.30…0.70 of the height)
+    /// so no frame clips and the wave keeps a visible baseline.
+    nonisolated static func recordingBarHeight(bar: Int, frame: Int) -> CGFloat {
+        let framePhase = 2 * CGFloat.pi * CGFloat(frame % frameCount) / CGFloat(frameCount)
+        let barPhase = 2 * CGFloat.pi * CGFloat(bar) / CGFloat(barCount)
+        let unit = (sin(framePhase + barPhase) + 1) / 2 // 0…1
+        return 0.30 + 0.40 * unit
+    }
 
     private static func drawRecordingAnimation(in rect: NSRect, frame: Int) {
-        let heights = recordingFrames[frame % recordingFrames.count]
-        let layout = barsLayout(in: rect)
+        drawBars(in: rect, heights: (0 ..< barCount).map { recordingBarHeight(bar: $0, frame: frame) })
+    }
 
-        for i in 0 ..< barCount {
+    /// Draw the five centred, capsule-ended bars at the given fractional
+    /// heights. Shared by the wave and the resting shape so the two cannot
+    /// drift in width, spacing or corner radius.
+    private static func drawBars(in rect: NSRect, heights: [CGFloat]) {
+        let layout = barsLayout(in: rect)
+        for i in 0 ..< min(barCount, heights.count) {
             let x = layout.left + CGFloat(i) * barSpacing
             let barH = rect.height * heights[i]
             let barRect = NSRect(
@@ -346,42 +333,16 @@ enum MenuBarIcon {
         }
     }
 
-    // MARK: - Error Badge (exclamation mark in bottom-right)
+    // MARK: - Error Dot (solid red dot in bottom-right)
 
-    private static func drawExclamationBadge(in rect: NSRect) {
-        let size: CGFloat = 7.0
-        let margin: CGFloat = 0.5
-        let cx = rect.maxX - size / 2 - margin
-        let cy = rect.minY + size / 2 + margin
-
-        // Red circle
-        NSColor.systemRed.setFill()
-        NSBezierPath(
-            ovalIn: NSRect(x: cx - size / 2, y: cy - size / 2, width: size, height: size),
-        ).fill()
-
-        // White "!" on top
-        NSColor.white.setFill()
-
-        // Stem
-        let stemW: CGFloat = 1.3
-        let stemH: CGFloat = 2.8
-        let stemY = cy + size / 2 - 1.8 - stemH
-        NSBezierPath(
-            roundedRect: NSRect(x: cx - stemW / 2, y: stemY, width: stemW, height: stemH),
-            xRadius: stemW / 2, yRadius: stemW / 2,
-        ).fill()
-
-        // Dot
-        let dotSize: CGFloat = 1.3
-        let dotY = cy - size / 2 + 1.0
-        NSBezierPath(ovalIn: NSRect(x: cx - dotSize / 2, y: dotY, width: dotSize, height: dotSize)).fill()
-    }
-
-    // MARK: - Record-Only Badge (solid red dot in bottom-right)
-
-    private static func drawRecordOnlyBadge(in rect: NSRect) {
-        let size: CGFloat = 5.0
+    /// The icon's only coloured mark: something is wrong, and the menu says what.
+    ///
+    /// A plain dot, not the exclamation-in-a-circle it replaces. At 18pt the
+    /// white "!" inside a 7pt circle was a smudge rather than a glyph, so it
+    /// carried no more meaning than a dot while taking more room and forcing
+    /// white into an otherwise two-colour icon.
+    private static func drawErrorDot(in rect: NSRect) {
+        let size: CGFloat = 6.0
         let margin: CGFloat = 0.5
         let cx = rect.maxX - size / 2 - margin
         let cy = rect.minY + size / 2 + margin
