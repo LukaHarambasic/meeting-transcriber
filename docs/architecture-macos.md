@@ -303,50 +303,98 @@ PipelineQueue: waiting → transcribing → [diarizing] → generatingProtocol �
 
 ### Menu Bar Icon Animations
 
-`BadgeKind.compute(watchState:queueState:permissionUnhealthy:updateAvailable:)` is the pure function that maps the combined `WatchLoop` + `PipelineQueue` state into one of `BadgeKind.inactive | .recording | .transcribing | .diarizing | .processing | .userAction | .done | .error | .updateAvailable`. `MenuBarIcon.image(badge:permissionOverlay:recordOnlyOverlay:)` then renders the matching animation frame.
+`BadgeKind.compute(recordingActive:transcriberState:activeJobState:updateAvailable:permissionProblem:)` is the pure function that maps the combined `WatchLoop` + `PipelineQueue` state into one of `BadgeKind.inactive | .recording | .transcribing | .diarizing | .processing | .userAction | .done | .error | .updateAvailable`. `MenuBarIcon.image(badge:animationFrame:errorOverlay:)` then renders the matching animation frame.
 
 | State | GIF | Triggered by | Code path |
 |-------|-----|--------------|-----------|
 | **Idle** | <img src="menu-bar-idle.gif" width="60"> | `WatchLoop.state == .idle` and `PipelineQueue` empty | `BadgeKind.inactive` |
-| **Recording** | <img src="menu-bar-recording.gif" width="60"> | `WatchLoop.state == .recording` (waveform bars bounce) | `BadgeKind.recording` |
+| **Recording** | <img src="menu-bar-recording.gif" width="60"> | `WatchLoop.state == .recording` (a wave travels across the bars) | `BadgeKind.recording` |
 | **Transcribing** | <img src="menu-bar-transcribing.gif" width="60"> | `PipelineJob.state == .transcribing / .recordingDone` (bars morph into text glyphs) | `BadgeKind.transcribing` |
-| **Diarizing** | <img src="menu-bar-diarizing.gif" width="60"> | `PipelineJob.state == .diarizing` (bars split into colored speaker groups) | `BadgeKind.diarizing` |
+| **Diarizing** | <img src="menu-bar-diarizing.gif" width="60"> | `PipelineJob.state == .diarizing` (bars split into two speaker groups) | `BadgeKind.diarizing` |
 | **Protocol** | <img src="menu-bar-protocol.gif" width="60"> | `PipelineJob.state == .generatingProtocol` (lines appear sequentially) | `BadgeKind.processing` |
 
-The icon is rendered as a SwiftUI `Image` template (auto-tinted by AppKit for light/dark mode) **unless** an overlay applies — overlays force non-template rendering to keep the colored badge intact.
+The recording animation is a sine wave spread across the five bars and advanced one frame per tick (`MenuBarIcon.recordingBarHeight(bar:frame:)`), amplitude bounded to 0.30–0.70 of the icon height so no frame clips. It replaced six hand-written random-looking height rows, which at 18pt and 2.5 frames a second read as jitter rather than as sound.
 
-### Permission problem badge
+### Colour is reserved for errors
 
-<p>
-<img src="menu-bar-permission.gif" width="80" alt="Permission problem badge">
-</p>
-
-A red circle with a white "!" is composited in the bottom-right corner by `MenuBarIcon.drawExclamationBadge` whenever `PermissionHealthCheck` reports Microphone or Screen Recording as `.denied` or `.broken`. The overlay sits **on top of whatever primary state animation** is currently active — the user still sees what the app is doing while being told something is wrong. See "Permission health check + badge overlay" below for the full health-check semantics.
-
-### Record-only mode badge
+Every state above renders as a **template image**, so AppKit inverts it for a light or dark menu bar and for the highlight the status item gets while its menu is open. The single exception is the red error dot, which forces non-template rendering (`MenuBarIcon.image(..., errorOverlay: true)`) because red does not survive template tinting.
 
 <p>
-<img src="menu-bar-record-only.gif" width="80" alt="Record-only mode">
+<img src="menu-bar-error.gif" width="80" alt="Error dot while idle">
+<img src="menu-bar-error-recording.gif" width="80" alt="Error dot while recording">
 </p>
 
-A persistent small red dot in the bottom-right corner indicates that **Record-only mode** is enabled (`AppSettings.recordOnly == true`). In this mode `WatchLoop.enqueueRecording()` moves dual-source WAVs into `<outputDir>/recordings/` together with a `<basename>_meta.json` `RecordingSidecar` and skips the entire post-processing pipeline (VAD, transcription, diarization, protocol). Intended for fleet topologies where macOS clients capture and a separate machine (e.g. a Linux GPU host via Syncthing) processes the audio. The sidecar's `trigger` field (`auto` | `manual`, schema version 2) tells that consumer which call site produced the recording; every recording written today is `manual` — `auto` is kept only for schema compatibility with sidecars written before meeting auto-detection was removed.
+`MenuBarIcon.drawErrorDot` composites a plain red dot in the bottom-right corner whenever `AppState.hasIssue` is true, i.e. whenever `AppState.currentIssue` resolves to a `RecordingIssue`. The badge body keeps animating underneath it, so a recording that hits a problem does not freeze into a static error icon that reads as "recording stopped".
 
-Like the permission badge, the dot is rendered as a persistent overlay on top of whatever primary animation is currently active — so the mode is always clearly indicated whether the app is idle, recording, or running anything else. **Precedence:** when both apply, the red exclamation (permission badge) wins, because a permission problem actually breaks recording while record-only is a deliberate user choice.
+**The dot and the menu's issue row read the same `currentIssue`**, which is the point: the icon can never show a problem the menu declines to name. Three earlier red marks were removed to get here — a record-only dot, a permission exclamation, and per-channel half-tinted bars — each of which forced a non-template image (so the icon stayed black-on-blue under the open-menu highlight) and none of which was explained anywhere in the UI.
 
-### Per-channel asymmetric-silence indicator
+### RecordingIssue: what is wrong, in one line
 
-When one capture channel goes silent while the other is still carrying audio for longer than the configured debounce window, the waveform bars in the menu bar are tinted **red** to surface the half-broken capture at a glance. `MenuBarIcon.image(..., micSilentOverlay:appSilentOverlay:)` paints the **top half** red when the mic channel is the silent one and the **bottom half** red when the app-audio channel is the silent one. When both apply, both halves are red (effectively all-red bars). Like the permission badge, this overlay forces non-template rendering so the red stays red in dark mode.
+`RecordingIssue.compose(permissionProblems:recordingError:micSilent:appSilent:)` is the pure function behind both the dot and the menu row. It returns at most one issue — the menu bar has room for one line the user will read, and a stack of three problems reads as noise where one reads as an instruction. Precedence is by what blocks a recording from *starting*, not by severity:
 
-The flags driving this overlay (`AppState.micSilentActive` / `AppState.appSilentActive`) are flipped by a ~10 Hz polling task that reads `WatchLoop.activeRecorder?.{mic,app}LevelDBFS` and feeds the values into a pure `ChannelHealthMonitor` state machine. The monitor uses two dBFS thresholds — `silenceThresholdDBFS` (-60) and `speechThresholdDBFS` (-50) — with hysteresis: an episode only starts when one channel is below silence *and* the other is above speech, and only resolves when the supposedly-silent side crosses back above the speech threshold. Transient dips into the dead zone between the thresholds (natural pauses between syllables) keep the debounce timer running rather than resetting it.
+1. **A permission problem** (`HealthCheckResult.problems`) — it refuses the recording outright and is the only entry the user can fix in ten seconds. Carries a `Remedy` that renders an *Open Screen Recording Settings* / *Open Microphone Settings* button pointing at the pane (`SystemSettingsPaths.screenRecordingURL` / `.microphoneURL`).
+2. **`WatchLoop.lastError`** — names a recording that already failed. Cleared when the next recording opens capture, so it never reports a failure the user has moved past.
+3. **A silent capture channel** — that recording is running and producing at least one usable track.
 
-Configurable in **Settings → Audio → Per-Channel Indicator**: master toggle (default on) and threshold slider (30–300 s, default 90 s). A `Capture Channel Silent` notification fires once per episode at the same moment the menu-bar tint kicks in.
+The row is passed to `MenuBarView` as its own `issue` property, separately from `status`. That separation is load-bearing: `AppState.currentStatus` is nil whenever no recording is active, so the previous error row (which read `status?.error` and required `state == .error`) could never fire for a problem that *prevented* a recording from starting. In practice that meant a denied Screen Recording grant showed a red icon above the word "Idle" with no explanation anywhere in the app.
 
-**Precedence ordering** (highest wins, composes over the others underneath):
+### Per-channel asymmetric-silence detection
 
-1. Permission badge (red exclamation) — actually breaks recording
-2. Channel-silent tint (red waveform halves) — degraded recording
-3. Record-only dot (persistent red dot) — user-chosen mode
-4. Primary state animation (idle / recording / transcribing / diarizing / protocol)
+When one capture channel goes silent while the other is still carrying audio for longer than the configured debounce window, `ChannelHealthController` flips `micSilentOverlay` / `appSilentOverlay`, which feed `RecordingIssue.compose` and so produce the error dot plus a menu row naming the dead channel.
+
+Those flags are set by a ~10 Hz polling task that reads `WatchLoop.activeRecorder?.{mic,app}LevelDBFS` and feeds the values into a pure `ChannelHealthMonitor` state machine. The monitor uses two dBFS thresholds — `silenceThresholdDBFS` (-60) and `speechThresholdDBFS` (-50) — with hysteresis: an episode only starts when one channel is below silence *and* the other is above speech, and only resolves when the supposedly-silent side crosses back above the speech threshold. Transient dips into the dead zone between the thresholds (natural pauses between syllables) keep the debounce timer running rather than resetting it.
+
+Configurable in **Settings → Audio → Per-Channel Indicator**: master toggle (default on) and threshold slider (30–300 s, default 90 s). A `Capture Channel Silent` notification fires once per episode at the same moment the menu-bar dot appears.
+
+### Record-only mode
+
+**Record-only mode** (`AppSettings.recordOnly == true`) makes `WatchLoop.enqueueRecording()` move dual-source WAVs into `<outputDir>/recordings/` together with a `<basename>_meta.json` `RecordingSidecar`, skipping the entire post-processing pipeline (VAD, transcription, diarization, protocol). Intended for fleet topologies where macOS clients capture and a separate machine (e.g. a Linux GPU host via Syncthing) processes the audio. The sidecar's `trigger` field (`auto` | `manual`, schema version 2) tells that consumer which call site produced the recording; every recording written today is `manual` — `auto` is kept only for schema compatibility with sidecars written before meeting auto-detection was removed.
+
+It no longer marks the menu-bar icon. The mode is a deliberate user choice rather than a problem, and a permanent red dot for it competed with the one mark that does mean something is wrong. It stays visible in **Settings → General**, which dims the pipeline-related sections and shows a banner naming the active output directory.
+
+---
+
+## Recording Durability
+
+Four mechanisms, each covering a case the others cannot. The reported failure — "I start recording, the MacBook goes to sleep, it stops recording and nothing happens" — was the absence of all four.
+
+### 1. Idle sleep is blocked while recording
+
+`RecordingPowerAssertion` holds an IOKit assertion of type `kIOPMAssertPreventUserIdleSystemSleep` from the moment capture opens until the recording stops. `WatchLoop` takes it in `startManualRecording` (after `recorder.start()` succeeds, so a refused start cannot leak one) and releases it on both stop paths, `stopManualRecording` and `cleanupManualRecording`.
+
+**System sleep, deliberately not display sleep.** Idle system sleep suspends the process and tears down the audio devices beneath it, which ends capture; display sleep does not. Blocking only system sleep is the whole fix, and it leaves the screen free to darken and lock — which is what was asked for. `kIOPMAssertPreventUserIdleDisplaySleep` would keep the panel lit through every meeting and cost battery for nothing.
+
+**What an assertion cannot do:** it only blocks *idle* sleep. A closed lid, Apple menu → Sleep and a flat battery all sleep the Mac regardless, and on Apple Silicon nothing changes that. Hence (2).
+
+### 2. Sleep that happens anyway finalizes the recording
+
+`PowerEventMonitor` bridges `NSWorkspace.willSleepNotification` and `.didWakeNotification` into closures that `AppState` wires to `WatchingController`. On will-sleep, `finalizeForSleep()` stops the recording through the same path the menu's **Stop** item uses, so the audio is mixed and enqueued exactly as a user-stopped recording, and notifies the user that it happened.
+
+macOS waits (briefly) for will-sleep observers before sleeping. If it stops waiting mid-mix the process is suspended rather than killed, so the mix resumes on wake — and if even that fails, (4) catches it.
+
+Both notifications come from `NSWorkspace.shared.notificationCenter`, not `NotificationCenter.default`. The same names registered on the default center are never posted, which is a silent no-op rather than an error, so having one place that gets it right is worth the type.
+
+### 3. A failed stop salvages what was captured
+
+`WatchLoop.stopManualRecording()` used to record a `stop()` failure in `lastError` and stop there — the per-track WAVs and the in-progress marker were still on disk, but only a *launch* would re-mix them, and for a menu-bar app that never quits that could be weeks. `salvageInterruptedRecording()` now runs `DualSourceRecorder.recoverCrashedRecordings(minAge: 0)` immediately, then `PipelineQueue.recoverOrphanedRecordings()` to turn the rescued `_mix.wav` into a job, and tells the user the audio survived.
+
+`minAge: 0` is safe *because* this runs on the stop path: the age window normally guards against re-mixing a recording that is still being written, and the only recording the app ever has is the one that just stopped. Cleanly finished recordings have a `_mix.wav` and are skipped by `crashedRecordingStems` at any age.
+
+### 4. Wake re-mixes anything a sleep truncated
+
+`WatchingController.recoverAfterWake()` runs the same recovery on `didWake`, for the interruptions that give no notice at all: a kernel panic, a battery that ran out, or will-sleep observers cut short mid-mix. It is guarded on nothing recording — with a live recording, `minAge: 0` would re-mix tracks still being written to, corrupting the recording it exists to protect. That guard is reachable in normal operation: whenever (1) does its job and only the display slept, the recording is still running when `didWake` fires.
+
+### Still-recording confirmation
+
+`RecordingConfirmationPolicy` is the pure decision: given `now`, when the recording was last known to be wanted, and when the outstanding ask was posted, it returns `.wait | .prompt | .stopUnconfirmed`. Defaults are a **30-minute interval** and a **5-minute grace**. `WatchLoop.stepConfirmation(now:)` drives it from the manual-recording monitor's poll, after the hard stop conditions so a recording whose target exited is attributed to that rather than to an unanswered ask.
+
+The ask is delivered as a `.timeSensitive` notification under the `recording-confirmation` category, whose one action is **Keep Recording**. Time-sensitive is not a nicety: the point is to reach someone who is in a meeting, which is exactly when Focus is on, and a suppressed ask is one nobody can answer — the grace period would then read that as an abandoned recording and stop it.
+
+- One ask outstanding at a time. A non-nil `promptedAt` suspends the interval entirely, so an ignored ask gets the grace period rather than a second ask stacked on the first.
+- Both the action button and a click on the banner body count as an answer (`UNNotificationDefaultActionIdentifier`) — the body click is the one most people make. An explicit dismiss does not.
+- The answer travels `NotificationManager` → `Notification.Name` → `AppState` → `WatchingController.confirmStillRecording()`, because `NotificationManager` is not `@MainActor` (its delegate callbacks arrive on arbitrary queues).
+- An unanswered ask **stops and saves**. The recording is enqueued, not discarded; a mistimed stop costs the rest of the meeting, never what was already captured.
+- Which notification carries the action is decided by `NotificationManager.categoryID(forTitle:)` matching `RecordingConfirmationPolicy.promptTitle`, rather than by widening `AppNotifying.notify` — that protocol is witnessed by a silent no-op and by test doubles, and its own doc comment explains why a new argument invites conformers that quietly drop it.
 
 ---
 
@@ -598,21 +646,18 @@ AppSettings (UserDefaults)
 | Microphone | Mic recording | AVAudioEngine |
 | None | App audio capture | CATapDescription (purple dot when granted via the audio-capture entitlement) |
 
-### Permission health check + badge overlay
+### Permission health check + how it is reported
 
 `PermissionHealthCheck` verifies each of the two TCC permissions (Microphone, Screen Recording — Accessibility was removed along with meeting auto-detection; its only consumer was the Teams participant/mute reader) by combining the system verdict with a live probe. Each permission resolves to `PermissionStatus.healthy | .denied | .broken | .notDetermined` — `.broken` means "TCC says allowed but the probe disagrees," which happens when macOS hasn't actually wired the permission through and the user needs to toggle it off and on in System Settings.
 
-`AppState`'s `PermissionsController` runs the check at launch and re-runs it, debounced, on app activation. `WatchLoop` separately gates each manual-recording start against the same check, scoped to what that recording actually opens. When the result is unhealthy:
+`AppState`'s `PermissionsController` runs the check at launch and re-runs it, debounced, on app activation. `WatchLoop` separately gates each manual-recording start against the same check, scoped to what that recording actually opens. When the result is unhealthy, it is reported on three channels:
 
-1. `MeetingTranscriberApp` passes `permissionOverlay: true` to `MenuBarIcon.image(...)`, which composites a red circle with a white "!" in the bottom-right corner over the current badge (`MenuBarIcon.drawExclamationBadge`). This bypasses the cached template icons and renders a non-template image because the overlay must stay red in both light and dark mode.
-2. `BadgeKind.compute(...)` returns `.error` when idle-with-problem, so the icon also reflects the problem state when no job is active.
-3. A notification is posted via `NotificationManager` with the list of affected permissions (deduplicated — only re-posted when the problem set actually changes).
+1. `AppState.currentIssue` resolves to a `RecordingIssue`, which puts a row in the menu naming the permission, what its absence costs, and a button opening the pane that fixes it.
+2. `AppState.hasIssue` is true, so the menu-bar icon composites the red error dot over whatever the current badge is.
+3. `BadgeKind.compute(...)` returns `.error` when idle-with-problem, so `/state.badge` reports it for driver scripts.
+4. A notification is posted via `NotificationManager` with the list of affected permissions (deduplicated — only re-posted when the problem set actually changes).
 
-The overlay lives over the *currently active* animation (idle, recording, transcribing, …) so the user still sees what the app is doing and is simultaneously told "one of the permissions is wrong."
-
-<p>
-<img src="menu-bar-permission.gif" width="80" alt="Permission problem badge">
-</p>
+Channel 1 is the one that was missing, and its absence was the whole defect: a denied Screen Recording grant refuses every recording that taps a process (`HealthCheckResult.recordingRefusalReason`), so pressing **Record** did nothing except post a banner that had auto-dismissed by the time the user opened the menu to ask why. The menu then said "Idle" under a red icon.
 
 ---
 

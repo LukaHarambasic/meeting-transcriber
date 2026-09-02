@@ -184,45 +184,37 @@ The app uses an animated waveform icon in the menu bar that reflects the current
 <img src="docs/menu-bar-protocol.gif" width="80" alt="Protocol">
 </p>
 
-**Idle** → **Recording** (bars bounce) → **Transcribing** (bars morph to text) → **Diarizing** (bars split into groups) → **Protocol** (lines appear sequentially)
+**Idle** → **Recording** (a wave travels across the bars) → **Transcribing** (bars morph to text) → **Diarizing** (bars split into groups) → **Protocol** (lines appear sequentially)
 
-### Permission problem badge
+All of these are template images, so macOS renders them black or white to match your menu bar, the same as every other menu-bar icon.
 
-<p>
-<img src="docs/menu-bar-permission.gif" width="80" alt="Permission problem">
-</p>
-
-A red exclamation mark in the bottom-right corner is overlaid on top of the current icon (idle, recording, transcribing, …) whenever one of the required permissions is missing or broken. It means at least one of the following is not in a working state:
-
-- **Microphone** — denied, or granted but the capture engine can't open the device
-- **Screen Recording** — denied (only relevant when it is the tap's fallback: an app or system recording with no "Audio Recording" grant)
-
-The health check distinguishes *denied* from *broken*. "Broken" usually means the permission is toggled on in System Settings but macOS hasn't actually wired it through — the fix is to toggle the permission off and on again for Meeting Transcriber under **System Settings → Privacy & Security**. Open the menu bar dropdown to see which specific permission is affected; a notification is also posted when the state changes.
-
-### Record-only mode badge
+### The red dot means something is wrong
 
 <p>
-<img src="docs/menu-bar-record-only.gif" width="80" alt="Record-only mode">
+<img src="docs/menu-bar-error.gif" width="80" alt="Error while idle">&nbsp;&nbsp;
+<img src="docs/menu-bar-error-recording.gif" width="80" alt="Error while recording">
 </p>
 
-A small red dot in the bottom-right corner is overlaid on top of the current icon (idle, recording, transcribing, …) whenever **Record-only mode** is enabled (Settings → General → "Record-only mode"). In this mode every recording still produces dual-source WAVs, but skips the entire post-recording pipeline (VAD, transcription, diarization, protocol generation). Recordings + a per-recording `<timestamp>_meta.json` sidecar are dropped into your configured Output Folder for an external pipeline (e.g. a Linux GPU host via Syncthing) to pick up. The dot stays visible across all states so the mode is always clearly indicated; if a permission problem coexists, the red exclamation badge takes precedence.
+Colour in the icon is reserved for exactly one thing: a problem. A red dot appears in the bottom-right corner, and **the menu says what it is** — one line naming the problem, plus a button that opens the System Settings pane that fixes it where one applies. The icon keeps animating underneath the dot, so a recording that hits a problem doesn't look like one that stopped.
 
-### Per-channel asymmetric-silence indicator
+What raises it:
 
-<p>
-<img src="docs/menu-bar-channel-silent-app.gif" width="80" alt="App-audio channel silent — bottom half red">&nbsp;&nbsp;
-<img src="docs/menu-bar-channel-silent-mic.gif" width="80" alt="Mic channel silent — top half red">
-</p>
+- **A missing or broken permission.** Microphone denied, or granted but the capture engine can't open the device. Screen Recording denied, which *refuses the recording outright* — this is the common one, and it is why pressing **Record** can appear to do nothing. The check distinguishes *denied* from *broken*: "broken" means the permission is on in System Settings but macOS hasn't wired it through, and the fix is to toggle it off and on again for Meeting Transcriber under **System Settings → Privacy & Security**.
+- **The last recording failed.** Cleared as soon as the next recording starts successfully.
+- **A capture channel went silent** while the other was still carrying audio for longer than the debounce window — you're speaking but nothing from the meeting is captured, or the meeting is audible but your voice isn't. A "Capture Channel Silent" notification fires once per episode at the same moment. Configurable in **Settings → Audio → Per-Channel Indicator** (default: on, 90 s debounce, range 30–300 s). The detector uses dual dBFS thresholds with hysteresis so pauses between syllables don't trigger it.
 
-When one capture channel goes silent while the other is still carrying audio for longer than the configured debounce window, the waveform bars are tinted red to surface the half-broken capture at a glance:
+**Record-only mode** does not mark the icon. It's a deliberate setting rather than a problem; it stays visible in **Settings → General**, which dims the pipeline sections and names the active output folder.
 
-- **Bottom half red** — app-audio channel is dead (you're speaking but nothing from the meeting app is being captured — bad tap, broken routing, system output muted)
-- **Top half red** — mic channel is dead (the meeting is audible but your voice isn't being captured — wrong input device, mic muted at system level)
-- **Both halves red** — both channels are silent while in recording state
+---
 
-A "Capture Channel Silent" notification fires once per episode at the moment the tint kicks in. Configurable in **Settings → Audio → Per-Channel Indicator** (default: on, 90 s debounce, range 30–300 s). Designed to surface real routing failures without false-positiving during normal speech pauses: the detector uses dual dBFS thresholds with hysteresis so transient dips between syllables don't reset the debounce timer.
+## Long recordings
 
-If a permission problem coexists, the red exclamation badge takes precedence over the channel-silent tint.
+Recordings are built to survive the things that used to end them silently.
+
+- **The screen can darken and lock.** While recording, the app holds a power assertion that stops the Mac from going to sleep when idle. Display sleep and the lock screen are deliberately left alone, so the screen still dims and still asks for your password — the recording just keeps running behind it.
+- **Sleep that can't be prevented saves the recording.** Closing the lid or choosing Sleep from the Apple menu sleeps the Mac regardless of any assertion. When that happens the recording is stopped and handed to the processing queue first, and you get a notification saying so.
+- **An interrupted recording is recovered.** If stopping fails, or a sleep cut things short with no warning at all, the surviving audio tracks are re-mixed and queued — immediately on the failure, and again on wake, rather than waiting for the next app launch.
+- **You're asked every 30 minutes whether to keep going.** A notification with a **Keep Recording** button; clicking the banner counts too. If nobody answers within 5 minutes the recording stops **and is saved** — so a meeting you walked away from costs half an hour of audio, not a night of it, and never costs what was already captured.
 
 ---
 
