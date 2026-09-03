@@ -379,6 +379,18 @@ class PipelineQueue {
         jobs.filter { $0.state == .waiting }
     }
 
+    /// Jobs that need a human to look at them: one that failed, or one that
+    /// finished but carries a warning.
+    ///
+    /// The menu shows only how many there are; the text lives in Settings →
+    /// Diagnostics. A warning like "App track diarization failed; labels cover
+    /// the microphone only" is a paragraph of context, and a menu is the wrong
+    /// place for a paragraph — it sizes to its widest item and offers nothing
+    /// to act on.
+    var problemJobs: [PipelineJob] {
+        jobs.filter { $0.state == .error || !$0.warnings.isEmpty }
+    }
+
     var completedJobs: [PipelineJob] {
         jobs.filter { $0.state == .done }
     }

@@ -202,6 +202,8 @@ struct MeetingTranscriberApp: App {
                 namingDialogActive: appState.pipeline.queue.pendingSpeakerNaming != nil,
                 pipelineBusy: appState.pipeline.queue.isProcessing,
                 onSpeakerMutate: appState.pipeline.queue.refreshKnownSpeakerNames,
+                pipelineQueue: appState.pipelineQueue,
+                onDismissJob: dismissJob,
             )
         }
         .windowResizability(.contentSize)
@@ -265,6 +267,12 @@ struct MeetingTranscriberApp: App {
     }
 
     // MARK: - UI Actions
+
+    /// Named rather than a closure literal at the call site: as the final
+    /// argument, a closure trips SwiftLint's `trailing_closure` rule.
+    private func dismissJob(_ id: UUID) {
+        appState.pipelineQueue.removeJob(id: id)
+    }
 
     private func openLastProtocol() {
         if let job = appState.pipeline.queue.completedJobs.last,

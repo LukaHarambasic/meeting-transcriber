@@ -43,7 +43,7 @@ struct MenuBarView: View {
         issueInfo
 
         recordControls
-        processingQueue
+        problemRows
 
         Divider()
 
@@ -136,17 +136,55 @@ struct MenuBarView: View {
         }
     }
 
-    @ViewBuilder private var processingQueue: some View {
-        if !pipelineQueue.jobs.isEmpty {
+    /// At most three one-line problems, each opening Settings.
+    ///
+    /// The menu used to render the whole queue: a "Processing" header plus a row
+    /// per job carrying its error or warning text. That is the wrong job for a
+    /// menu. A menu sizes to its widest item, so a warning sentence stretched
+    /// it; the rows offered nothing to act on; and finished jobs lingered as
+    /// entries that read like meetings rather than like problems.
+    ///
+    /// Three is a cap, not a target: enough to see that something is wrong and
+    /// roughly what, few enough that the menu cannot grow. The text itself, and
+    /// anything that can be done about it, is in Settings → Diagnostics.
+    @ViewBuilder private var problemRows: some View {
+        let problems = pipelineQueue.problemJobs
+        if !problems.isEmpty {
             Divider()
-            Label("Processing", systemImage: "gearshape.2.fill")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            ForEach(pipelineQueue.jobs) { job in
-                jobRow(job)
+            ForEach(problems.prefix(Self.menuProblemLimit)) { job in
+                Button {
+                    onOpenSettings()
+                } label: {
+                    Label(Self.problemRowTitle(job), systemImage: Self.problemRowIcon(job))
+                }
+            }
+            if problems.count > Self.menuProblemLimit {
+                Button {
+                    onOpenSettings()
+                } label: {
+                    Text("\(problems.count - Self.menuProblemLimit) more in Settings")
+                }
             }
         }
+    }
+
+    /// How many problems the menu will show before deferring the rest to
+    /// Settings.
+    static let menuProblemLimit = 3
+
+    /// Meeting plus a short reason, hard-truncated. The full text is in
+    /// Settings; this row exists to say "this one" and to get you there.
+    static func problemRowTitle(_ job: PipelineJob) -> String {
+        let reason = job.error ?? job.warnings.first ?? JobState.error.label
+        let short = reason.count > 30 ? String(reason.prefix(29)) + "…" : reason
+        let title = job.meetingTitle.count > 24
+            ? String(job.meetingTitle.prefix(23)) + "…"
+            : job.meetingTitle
+        return title + " · " + short
+    }
+
+    static func problemRowIcon(_ job: PipelineJob) -> String {
+        job.state == .error ? "exclamationmark.triangle" : "exclamationmark.circle"
     }
 
     @ViewBuilder private var protocolActions: some View {
@@ -200,93 +238,6 @@ struct MenuBarView: View {
     }
 
     // MARK: - Helpers
-
-    /// One job, one menu row.
-    ///
-    /// It used to be an `HStack` of a status dot, a two-line `VStack` and up to
-    /// three `Button`s. A menu cannot render that: SwiftUI flattens the controls
-    /// into separate rows, so a single finished job became a title row, a status
-    /// row and a bare "Dismiss" row with nothing tying them together — the
-    /// sprawling faded block that was reported. Long warning text widened the
-    /// menu on top of that.
-    ///
-    /// So: one `Button` per job, its label carrying title and state, and exactly
-    /// one action — the one that job's state actually affords. A running job has
-    /// no action, so its row is disabled rather than fabricating one.
-    private func jobRow(_ job: PipelineJob) -> some View {
-        Button {
-            jobAction(job)
-        } label: {
-            Label(jobRowTitle(job), systemImage: jobRowIcon(job))
-        }
-        .disabled(!jobHasAction(job))
-    }
-
-    /// Title and state on one line, truncated. The state word is what changes;
-    /// repeating the meeting title on a second line added no information.
-    private func jobRowTitle(_ job: PipelineJob) -> String {
-        let title = job.meetingTitle.count > 28
-            ? String(job.meetingTitle.prefix(27)) + "…"
-            : job.meetingTitle
-        return title + " · " + jobRowStatus(job)
-    }
-
-    /// The shortest true description of where this job is.
-    ///
-    /// An error or warning wins over the state word, because "Error" alone sends
-    /// the user hunting. Both are truncated: the untruncated warning text is
-    /// what stretched the menu.
-    private func jobRowStatus(_ job: PipelineJob) -> String {
-        let detail: String? = if job.state == .error {
-            job.error
-        } else if !job.warnings.isEmpty {
-            job.warnings.first
-        } else if [.transcribing, .diarizing, .generatingProtocol].contains(job.state) {
-            stageProgressText(job)
-        } else {
-            nil
-        }
-        guard let detail, !detail.isEmpty else { return job.state.label }
-        return detail.count > 44 ? String(detail.prefix(43)) + "…" : detail
-    }
-
-    private func jobRowIcon(_ job: PipelineJob) -> String {
-        switch job.state {
-        case .done: "checkmark.circle"
-        case .error: "exclamationmark.triangle"
-        case .speakerNamingPending: "person.2"
-        default: "clock"
-        }
-    }
-
-    /// Whether this job's row does anything when clicked. Drives `.disabled`, so
-    /// a row that cannot act says so instead of swallowing the click.
-    private func jobHasAction(_ job: PipelineJob) -> Bool {
-        switch job.state {
-        case .done, .error, .speakerNamingPending: true
-        default: false
-        }
-    }
-
-    /// The single action a job's state affords: open the finished output, name
-    /// its speakers, or clear a failure. A running job is not cancellable from
-    /// here any more — a "Cancel" that sat next to "Dismiss" on a flattened row
-    /// was one mis-click away from discarding a recording mid-transcription.
-    private func jobAction(_ job: PipelineJob) {
-        switch job.state {
-        case .done:
-            if let path = job.protocolPath ?? job.transcriptPath { onOpenProtocol(path) }
-
-        case .speakerNamingPending:
-            onNameSpeakers?()
-
-        case .error:
-            onDismissJob(job.id)
-
-        default:
-            break
-        }
-    }
 
     /// Live elapsed for the active stage, plus the historical average ("· Ø
     /// m:ss") when one exists, and a "longer than usual" hint once the live run

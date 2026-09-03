@@ -20,6 +20,10 @@ struct SettingsView: View {
     /// True when the pipeline is processing a job — soft hint only.
     var pipelineBusy: Bool = false
     var onSpeakerMutate: (() -> Void)?
+    /// The live queue, for the Diagnostics tab's problem list. Errors and
+    /// warnings are written out in full there; the menu only counts them.
+    var pipelineQueue: PipelineQueue
+    var onDismissJob: (UUID) -> Void
 
     @State private var selection: SettingsTab = .general
 
@@ -82,6 +86,12 @@ struct SettingsView: View {
         case .output:
             OutputSettingsView(settings: settings)
 
+        case .diagnostics:
+            DiagnosticsSettingsView(
+                pipelineQueue: pipelineQueue,
+                onDismissJob: onDismissJob,
+            )
+
         case .advanced:
             AdvancedSettingsView(settings: settings)
         }
@@ -89,7 +99,7 @@ struct SettingsView: View {
 }
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, audio, transcription, speakers, output, advanced
+    case general, audio, transcription, speakers, output, diagnostics, advanced
 
     var id: String {
         rawValue
@@ -102,6 +112,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .transcription: "Transcription"
         case .speakers: "Speakers"
         case .output: "Output"
+        case .diagnostics: "Diagnostics"
         case .advanced: "Advanced"
         }
     }
@@ -113,6 +124,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .transcription: "waveform"
         case .speakers: "person.2"
         case .output: "doc.text"
+        case .diagnostics: "stethoscope"
         case .advanced: "wrench.and.screwdriver"
         }
     }
