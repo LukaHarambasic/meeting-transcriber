@@ -7,6 +7,10 @@ struct MenuBarView: View {
     /// a problem that *stops* recordings from starting — a denied grant, the
     /// exact case the user hit — could never be shown through it.
     let issue: RecordingIssue?
+    /// When the live recording started, or nil when nothing is recording. Drives
+    /// the header's elapsed counter — the one fact about a running recording the
+    /// menu can add.
+    let recordingStartedAt: Date?
     let pipelineQueue: PipelineQueue
     var updateChecker: UpdateChecker?
     let onRecordMeeting: () -> Void
@@ -29,15 +33,6 @@ struct MenuBarView: View {
         status?.state ?? .idle
     }
 
-    /// Hoisted out of the `ViewBuilder`: an `Optional.map` returning an
-    /// interpolated string, coalesced with `??`, inside an overloaded `Text`
-    /// initializer is the exact shape that blew the 300 ms type-check budget in
-    /// this file before (see the note on `body`).
-    private func meetingLabel(_ meeting: MeetingInfo) -> String {
-        guard let pid = meeting.pid else { return meeting.app }
-        return "\(meeting.app) (PID \(pid))"
-    }
-
     // The sections below are hoisted out of `body` into separate computed
     // properties so each is type-checked independently. Inlined as one
     // expression, the `body` getter crossed the 300 ms type-check budget that
@@ -46,7 +41,6 @@ struct MenuBarView: View {
     // order, dividers, and conditionals are unchanged.
     var body: some View {
         statusHeader
-        meetingInfo
         issueInfo
 
         Divider()
@@ -70,35 +64,31 @@ struct MenuBarView: View {
 
     // MARK: - Body sections
 
+    /// One line: what the app is doing, and for a recording how long it has been
+    /// doing it.
+    ///
+    /// This replaces four rows that all said the same thing. A live recording
+    /// rendered `state.label` ("Recording"), then `status.detail` ("Recording:
+    /// Meeting Recording"), then `meeting.title` ("Meeting Recording"), then
+    /// `meetingLabel` ("Meeting") — the same fact four times, none of it
+    /// actionable, and the meeting block was placeholder text for the
+    /// system-wide recording that has no single app to name.
+    ///
+    /// The elapsed time is the one thing a running recording can tell you that
+    /// you do not already know. `Text(_:style:.timer)` updates itself, so it
+    /// needs no timer of ours and cannot go stale while the menu is open.
     private var statusHeader: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label(state.label, systemImage: state.icon)
-                .font(.headline)
-
-            if let detail = status?.detail, !detail.isEmpty {
-                Text(detail)
-                    .font(.caption)
+        HStack(spacing: 6) {
+            Image(systemName: state.icon)
+            Text(state.label)
+            if let startedAt = recordingStartedAt {
+                Text(startedAt, style: .timer)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
         }
+        .font(.headline)
         .padding(.horizontal, 4)
-    }
-
-    @ViewBuilder private var meetingInfo: some View {
-        if let meeting = status?.meeting {
-            Divider()
-            VStack(alignment: .leading, spacing: 2) {
-                Text(meeting.title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                // A microphone-only recording owns no process, so there is no
-                // PID to show and a placeholder would only read as a real one.
-                Text(meetingLabel(meeting))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 4)
-        }
     }
 
     /// The row that says what is wrong and offers the pane that fixes it.
@@ -111,38 +101,23 @@ struct MenuBarView: View {
     ///
     /// The remedy button is separate from the text block so it is a real menu
     /// item the user can click, not a caption inside a `VStack`.
+    /// The problem, in one line, followed by the button that fixes it.
+    ///
+    /// The explanatory sentence that used to sit under the headline is gone.
+    /// "Screen Recording permission denied" plus **Open Screen Recording
+    /// Settings** already says what is wrong and what to do; a sentence
+    /// restating the consequence only widened the menu, which is what made it
+    /// stretch across the display in the first place.
     @ViewBuilder private var issueInfo: some View {
         if let issue {
             Divider()
-            issueText(issue)
-            issueRemedyButton(issue)
-        }
-    }
-
-    /// Width the issue row is allowed to occupy.
-    ///
-    /// A menu sizes itself to its widest item, and a `Text` with no width
-    /// constraint reports its full single-line width — so one long sentence
-    /// here stretched the entire dropdown across the display. Capping the width
-    /// and letting the text wrap (`fixedSize` vertical-only) is what keeps the
-    /// menu the size of a menu. The number matches the dropdown's natural width
-    /// from its other rows, so the issue row never widens it.
-    private static let issueRowWidth: CGFloat = 240
-
-    private func issueText(_ issue: RecordingIssue) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
             Text(issue.headline)
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.red)
-            Text(issue.detail)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+            issueRemedyButton(issue)
         }
-        .multilineTextAlignment(.leading)
-        .frame(width: Self.issueRowWidth, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 4)
     }
 
     /// Hoisted into its own function rather than inlined in `issueInfo`: the

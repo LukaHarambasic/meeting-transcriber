@@ -39,8 +39,11 @@ struct RecordingIssue: Equatable {
         }
     }
 
+    /// The whole message, in one line. There is deliberately no second
+    /// explanatory field: the headline plus `remedy`'s button title already say
+    /// what is wrong and what to do, and a sentence restating the consequence
+    /// only widened the menu — a menu sizes itself to its widest item.
     let headline: String
-    let detail: String
     let remedy: Remedy?
 }
 
@@ -73,51 +76,22 @@ extension RecordingIssue {
         if let problem = permissionProblems.first {
             return RecordingIssue(
                 headline: problem.description,
-                detail: permissionDetail(for: problem),
                 remedy: remedy(for: problem),
             )
         }
         if let recordingError, !recordingError.isEmpty {
-            return RecordingIssue(
-                headline: "Last recording failed",
-                detail: recordingError,
-                remedy: nil,
-            )
+            // The error itself is the headline: "Last recording failed" plus a
+            // separate detail line said less, in two rows, than the message does
+            // in one.
+            return RecordingIssue(headline: recordingError, remedy: nil)
         }
         if micSilent {
-            return RecordingIssue(
-                headline: "Microphone is silent",
-                detail: ChannelHealthController.asymmetricSilenceMessage(for: .mic),
-                remedy: .openMicrophone,
-            )
+            return RecordingIssue(headline: "Microphone is silent", remedy: .openMicrophone)
         }
         if appSilent {
-            return RecordingIssue(
-                headline: "App audio is silent",
-                detail: ChannelHealthController.asymmetricSilenceMessage(for: .app),
-                remedy: .openScreenRecording,
-            )
+            return RecordingIssue(headline: "App audio is silent", remedy: .openScreenRecording)
         }
         return nil
-    }
-
-    /// What a denied or broken grant actually costs, in one short sentence.
-    ///
-    /// Deliberately short. This renders as a row in the menu-bar dropdown, and
-    /// a menu sizes itself to its widest item: the first version named the full
-    /// System Settings path here and stretched the whole menu across the
-    /// screen. The path belongs on the button that opens it, not in prose, and
-    /// the restart hint belongs nowhere until it is true (a `.broken` grant
-    /// carries its own toggle-off-and-on remedy in
-    /// `PermissionProblem.description`, which is already the headline).
-    private static func permissionDetail(for problem: PermissionProblem) -> String {
-        switch problem {
-        case .screenRecordingDenied, .screenRecordingBroken:
-            "Recording is refused without it."
-
-        case .microphoneDenied, .microphoneBroken:
-            "Your own voice will not be recorded."
-        }
     }
 
     private static func remedy(for problem: PermissionProblem) -> Remedy {

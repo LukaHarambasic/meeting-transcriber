@@ -30,7 +30,6 @@ final class RecordingIssueTests: XCTestCase {
         )
         XCTAssertEqual(issue?.headline, PermissionProblem.screenRecordingDenied.description)
         XCTAssertEqual(issue?.remedy, .openScreenRecording)
-        XCTAssertFalse(issue?.detail.isEmpty ?? true, "the row has to say what the denial costs")
     }
 
     func testDeniedMicrophoneBecomesAnIssueWithItsPane() {
@@ -64,7 +63,7 @@ final class RecordingIssueTests: XCTestCase {
             recordingError: "Disk full", micSilent: false, appSilent: false,
         )
         XCTAssertEqual(issue?.remedy, .openScreenRecording)
-        XCTAssertNotEqual(issue?.detail, "Disk full")
+        XCTAssertNotEqual(issue?.headline, "Disk full", "the grant outranks the failed recording")
     }
 
     /// A recording error names a recording that failed; a silent channel is a
@@ -74,8 +73,10 @@ final class RecordingIssueTests: XCTestCase {
             permissionProblems: [],
             recordingError: "Disk full", micSilent: true, appSilent: true,
         )
-        XCTAssertEqual(issue?.headline, "Last recording failed")
-        XCTAssertEqual(issue?.detail, "Disk full")
+        XCTAssertEqual(
+            issue?.headline, "Disk full",
+            "the error message is the headline; a generic label plus a detail row said less",
+        )
         XCTAssertNil(issue?.remedy, "a failed stop has no settings pane that would help")
     }
 

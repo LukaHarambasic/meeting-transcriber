@@ -100,6 +100,13 @@ class WatchLoop {
     /// user's last confirmation. `private(set)` for the RPC snapshot and tests.
     private(set) var confirmedAt: Date = .distantPast
 
+    /// When the live recording started, or nil when nothing is recording.
+    ///
+    /// Distinct from `confirmedAt`, which the still-recording check resets on
+    /// every confirmation — reusing it for the menu's elapsed counter would
+    /// restart the clock at 30-minute intervals.
+    private(set) var recordingStartedAt: Date?
+
     /// When the outstanding "still recording?" ask was posted, or nil if none
     /// is. Non-nil suspends the interval entirely — see
     /// `RecordingConfirmationPolicy`.
@@ -240,6 +247,7 @@ class WatchLoop {
         // happened, and nothing releases an assertion no recording owns.
         sleepBlocker?.hold(reason: "Meeting Transcriber is recording")
         confirmedAt = nowProvider()
+        recordingStartedAt = nowProvider()
         confirmationPromptedAt = nil
 
         let pid = source.appPID
@@ -284,6 +292,7 @@ class WatchLoop {
 
         sleepBlocker?.release()
         confirmationPromptedAt = nil
+        recordingStartedAt = nil
         activeRecorder = nil
         update { next in
             next.phase = .idle
@@ -298,6 +307,7 @@ class WatchLoop {
         manualRecordingTask = nil
         sleepBlocker?.release()
         confirmationPromptedAt = nil
+        recordingStartedAt = nil
         activeRecorder = nil
         update { next in next.manualRecordingInfo = nil }
     }

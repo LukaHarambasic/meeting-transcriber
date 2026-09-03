@@ -60,8 +60,40 @@ enum BadgeKind: String, CaseIterable, Codable {
 /// breaking anyone.
 @MainActor
 enum MenuBarIcon {
-    /// Number of distinct animation frames. Pure constant.
-    nonisolated static let frameCount = 6
+    /// Frames in one animation cycle. With `frameInterval` this is a 1.5 s loop.
+    nonisolated static let frameCount = 36
+
+    /// Seconds between frames: 24 fps.
+    ///
+    /// The previous pairing was 6 frames at 0.4 s, i.e. **2.5 fps**, which does
+    /// not read as motion at all — it reads as a handful of discrete poses, and
+    /// was reported as "looks like 4fps, it's not smooth". Frame count and
+    /// interval live together here because only their product is meaningful:
+    /// changing one alone either speeds the loop up or makes it choppy again.
+    ///
+    /// 24 fps over 36 frames keeps the 1.5 s cycle the old timing was reaching
+    /// for. The cost is the pre-rendered cache: 4 animated badges × 36 frames of
+    /// an 18 pt image, a few hundred KB, paid once at launch.
+    nonisolated static let frameInterval: TimeInterval = 1.0 / 24
+
+    /// Position within the cycle, `0..<1`. Every animation is a function of this
+    /// rather than of the raw frame index, so `frameCount` can change without
+    /// retuning each one — the trap that made the old six-element step tables
+    /// wrong the moment the frame count moved.
+    nonisolated static func phase(_ frame: Int) -> CGFloat {
+        CGFloat(frame % frameCount) / CGFloat(frameCount)
+    }
+
+    /// Smooth 0 → 1 → 0 across one cycle.
+    ///
+    /// Loops seamlessly: both the value and its slope match at the wrap, so a
+    /// morph eases out and back instead of snapping to its start. The step
+    /// tables this replaces ran 0 → 1 and then jumped, which at 2.5 fps was
+    /// indistinguishable from the general choppiness and at 24 fps would be the
+    /// one visible stutter per cycle.
+    nonisolated static func pingPong(_ frame: Int) -> CGFloat {
+        (1 - cos(2 * .pi * phase(frame))) / 2
+    }
 
     /// Run-loop mode for the menu-bar animation timer (`AnimatedMenuBarIcon`).
     ///
@@ -251,7 +283,7 @@ enum MenuBarIcon {
     /// Amplitude stops well short of the icon's edges (0.30…0.70 of the height)
     /// so no frame clips and the wave keeps a visible baseline.
     nonisolated static func recordingBarHeight(bar: Int, frame: Int) -> CGFloat {
-        let framePhase = 2 * CGFloat.pi * CGFloat(frame % frameCount) / CGFloat(frameCount)
+        let framePhase = 2 * CGFloat.pi * phase(frame)
         let barPhase = 2 * CGFloat.pi * CGFloat(bar) / CGFloat(barCount)
         let unit = (sin(framePhase + barPhase) + 1) / 2 // 0…1
         return 0.30 + 0.40 * unit
@@ -281,11 +313,9 @@ enum MenuBarIcon {
 
     // MARK: - Transcribing Animation (waveform → text lines)
 
-    private static let transcribeMorphSteps: [CGFloat] = [0.0, 0.15, 0.35, 0.6, 0.85, 1.0]
-
     private static func drawTranscribingAnimation(in rect: NSRect, frame: Int) {
         let h = rect.height
-        let t = transcribeMorphSteps[frame % transcribeMorphSteps.count]
+        let t = pingPong(frame)
         let bars = barsLayout(in: rect)
         let text = textLayout(in: rect)
 
@@ -317,11 +347,9 @@ enum MenuBarIcon {
 
     // MARK: - Diarizing Animation (bars split into two speaker groups)
 
-    private static let diarizeSplitSteps: [CGFloat] = [0.0, 0.2, 0.5, 0.8, 1.0, 0.8]
-
     private static func drawDiarizingAnimation(in rect: NSRect, frame: Int) {
         let h = rect.height
-        let t = diarizeSplitSteps[frame % diarizeSplitSteps.count]
+        let t = pingPong(frame)
         let layout = barsLayout(in: rect)
 
         let maxShift: CGFloat = 2.5
@@ -389,7 +417,9 @@ enum MenuBarIcon {
 
     private static func drawProtocolAnimation(in rect: NSRect, frame: Int) {
         let text = textLayout(in: rect)
-        let visibleLines = (frame % frameCount) + 1
+        // Spread the reveal across the whole cycle. Tied to `frameCount`
+        // directly, this counted to 36 while only `barCount` lines exist.
+        let visibleLines = 1 + Int(phase(frame) * CGFloat(barCount))
 
         for i in 0 ..< min(visibleLines, barCount) {
             let lineW = rect.width * lineWidths[i]

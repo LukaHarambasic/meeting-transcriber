@@ -23,8 +23,12 @@ private struct AnimatedMenuBarIcon: View {
     @State private var animationFrame = 0
     // `.default` (not `.common`) so the timer never fires inside the status-bar
     // menu's tracking loop — see MenuBarIcon.animationRunLoopMode for why.
+    //
+    // The interval comes from `MenuBarIcon` rather than being written here: it
+    // is only meaningful against `frameCount`, and this file holding a separate
+    // 0.4 s was how the animation ended up running at 2.5 fps.
     private let iconTimer = Timer.publish(
-        every: 0.4, on: .main, in: MenuBarIcon.animationRunLoopMode,
+        every: MenuBarIcon.frameInterval, on: .main, in: MenuBarIcon.animationRunLoopMode,
     ).autoconnect()
 
     var body: some View {
@@ -87,6 +91,7 @@ struct MeetingTranscriberApp: App {
             MenuBarView(
                 status: appState.currentStatus,
                 issue: appState.currentIssue,
+                recordingStartedAt: appState.recordingStartedAt,
                 pipelineQueue: appState.pipelineQueue,
                 updateChecker: appState.updateChecker,
                 onRecordMeeting: { appState.watching.startMeetingRecording() },
