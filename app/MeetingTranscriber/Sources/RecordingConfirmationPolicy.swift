@@ -90,7 +90,7 @@ struct RecordingConfirmationPolicy: Equatable {
     var promptBody: String {
         let minutes = Int(grace / 60)
         let lead = "Meeting Transcriber has been recording for a while. "
-        let tail = "Click here to keep going — otherwise the recording stops and is saved in "
+        let tail = "Click here to keep going. Otherwise the recording stops and is saved in "
         return lead + tail + String(minutes) + " minutes."
     }
 }

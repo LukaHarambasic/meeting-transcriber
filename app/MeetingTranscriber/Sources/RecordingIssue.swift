@@ -101,21 +101,22 @@ extension RecordingIssue {
         return nil
     }
 
-    /// What a denied or broken grant actually costs, so the row says more than
-    /// the permission's name. A `.broken` grant needs the off-and-on-again
-    /// remedy that `PermissionProblem.description` already carries, so this only
-    /// adds the consequence.
+    /// What a denied or broken grant actually costs, in one short sentence.
+    ///
+    /// Deliberately short. This renders as a row in the menu-bar dropdown, and
+    /// a menu sizes itself to its widest item: the first version named the full
+    /// System Settings path here and stretched the whole menu across the
+    /// screen. The path belongs on the button that opens it, not in prose, and
+    /// the restart hint belongs nowhere until it is true (a `.broken` grant
+    /// carries its own toggle-off-and-on remedy in
+    /// `PermissionProblem.description`, which is already the headline).
     private static func permissionDetail(for problem: PermissionProblem) -> String {
         switch problem {
         case .screenRecordingDenied, .screenRecordingBroken:
-            "Recording is refused without it — the system-audio tap would capture silence. "
-                + "Enable Meeting Transcriber under \(SystemSettingsPaths.screenRecording), "
-                + "then restart the app."
+            "Recording is refused without it."
 
         case .microphoneDenied, .microphoneBroken:
-            "Your own voice cannot be recorded without it. "
-                + "Enable Meeting Transcriber under "
-                + "System Settings → Privacy & Security → Microphone."
+            "Your own voice will not be recorded."
         }
     }
 

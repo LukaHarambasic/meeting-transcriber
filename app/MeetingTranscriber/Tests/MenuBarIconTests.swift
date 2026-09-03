@@ -53,6 +53,54 @@ final class MenuBarIconTests: XCTestCase {
         )
     }
 
+    /// The reported bug: the icon rendered black on a dark menu bar while every
+    /// other status item was white.
+    ///
+    /// The cause was reading `NSApp.effectiveAppearance` *before* the image's
+    /// drawing closure. That reports the system Light/Dark setting, which is not
+    /// what the menu bar is — since Big Sur the menu bar goes dark whenever the
+    /// desktop picture behind it is dark, in Light Mode too. On a light system
+    /// with a dark wallpaper the read said "light", the fill was black, and the
+    /// icon was invisible against its own menu bar.
+    ///
+    /// This pins the fix by driving the two drawing appearances directly: the
+    /// error image must differ between them. Under the old hoisted read both
+    /// renders were byte-identical, because `NSApp`'s appearance does not change
+    /// inside these blocks — so this test fails on the old code for the stated
+    /// reason, which is the only reason to trust it.
+    func testErrorIconTakesItsColourFromTheDrawingAppearance() throws {
+        var light: Data?
+        var dark: Data?
+        try XCTUnwrap(NSAppearance(named: .aqua)).performAsCurrentDrawingAppearance {
+            light = MenuBarIcon.image(badge: .inactive, errorOverlay: true).tiffRepresentation
+        }
+        try XCTUnwrap(NSAppearance(named: .darkAqua)).performAsCurrentDrawingAppearance {
+            dark = MenuBarIcon.image(badge: .inactive, errorOverlay: true).tiffRepresentation
+        }
+        XCTAssertNotNil(light, "the error image must actually rasterise")
+        XCTAssertNotNil(dark)
+        XCTAssertNotEqual(
+            light, dark,
+            "the error icon must follow the appearance it is drawn into, not the app's setting",
+        )
+    }
+
+    /// The other half, and the reason only the error state has to ask: every
+    /// non-error badge is a template image, so AppKit derives the colour and the
+    /// render is appearance-independent. If one of these ever started varying,
+    /// it would mean a badge had silently stopped being a template.
+    func testNonErrorIconsAreAppearanceIndependent() throws {
+        var light: Data?
+        var dark: Data?
+        try XCTUnwrap(NSAppearance(named: .aqua)).performAsCurrentDrawingAppearance {
+            light = MenuBarIcon.image(badge: .inactive).tiffRepresentation
+        }
+        try XCTUnwrap(NSAppearance(named: .darkAqua)).performAsCurrentDrawingAppearance {
+            dark = MenuBarIcon.image(badge: .inactive).tiffRepresentation
+        }
+        XCTAssertEqual(light, dark, "a template image must not bake in an appearance")
+    }
+
     func testErrorOverlayDefaultsOff() {
         let withoutParam = MenuBarIcon.image(badge: .recording, animationFrame: 0)
         let explicitFalse = MenuBarIcon.image(badge: .recording, animationFrame: 0, errorOverlay: false)

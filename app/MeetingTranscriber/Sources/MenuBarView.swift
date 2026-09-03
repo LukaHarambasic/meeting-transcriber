@@ -119,6 +119,16 @@ struct MenuBarView: View {
         }
     }
 
+    /// Width the issue row is allowed to occupy.
+    ///
+    /// A menu sizes itself to its widest item, and a `Text` with no width
+    /// constraint reports its full single-line width — so one long sentence
+    /// here stretched the entire dropdown across the display. Capping the width
+    /// and letting the text wrap (`fixedSize` vertical-only) is what keeps the
+    /// menu the size of a menu. The number matches the dropdown's natural width
+    /// from its other rows, so the issue row never widens it.
+    private static let issueRowWidth: CGFloat = 240
+
     private func issueText(_ issue: RecordingIssue) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(issue.headline)
@@ -129,6 +139,9 @@ struct MenuBarView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+        .multilineTextAlignment(.leading)
+        .frame(width: Self.issueRowWidth, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 4)
     }
 

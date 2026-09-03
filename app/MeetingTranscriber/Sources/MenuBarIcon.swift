@@ -160,18 +160,27 @@ enum MenuBarIcon {
         errorOverlay: Bool = false,
     ) -> NSImage {
         let size = NSSize(width: 18, height: 18)
-        // Snapshot the dark-mode appearance on the calling thread (the cache
-        // builder runs at type init on the main thread; ad-hoc error renders
-        // also originate from `image(badge:…)` on MainActor). The NSImage
-        // closure can be invoked off-main during composition, so we cannot read
-        // NSApp from inside it under Swift 6.
-        //
-        // Only the error render consults it. A template image needs no
-        // foreground colour at all — AppKit derives one — so every other badge
-        // is appearance-independent and safe to cache once at launch.
-        let isDark = NSApp?.effectiveAppearance
-            .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let image = NSImage(size: size, flipped: false) { rect in
+            // `NSAppearance.currentDrawing()`, read HERE rather than hoisted, is
+            // the whole fix for a black icon on a dark menu bar.
+            //
+            // The obvious thing — `NSApp.effectiveAppearance` computed before
+            // this closure — reports the *system* Light/Dark setting, and that
+            // is not what the menu bar is. Since Big Sur the menu bar is
+            // translucent and goes dark whenever the desktop picture behind it
+            // is dark, in Light Mode too. So on a light system with a dark
+            // wallpaper the hoisted read said "light", we filled black, and the
+            // icon was black-on-dark: exactly the state this was reported in.
+            //
+            // Only AppKit knows the menu bar's effective appearance, and the way
+            // it tells you is by invoking this closure with that appearance
+            // current. That is also why every non-error badge is a template
+            // image: AppKit then derives the colour itself and this question
+            // never arises. `errorOverlay` cannot be a template (red would be
+            // tinted away), so it has to ask — and this is the only place where
+            // asking gets a truthful answer.
+            let isDark = NSAppearance.currentDrawing()
+                .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             if errorOverlay {
                 (isDark ? NSColor.white : NSColor.black).setFill()
             } else {
