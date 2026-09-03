@@ -107,7 +107,6 @@ struct MeetingTranscriberApp: App {
                 onNameSpeakers: appState.hasPendingSpeakerNamingJobs ? {
                     bringWindowToFront(id: "speaker-naming")
                 } : nil,
-                onProcessFiles: processAudioFiles,
                 onDismissJob: { id in appState.pipelineQueue.removeJob(id: id) },
                 onQuit: quit,
             )
@@ -266,24 +265,6 @@ struct MeetingTranscriberApp: App {
     }
 
     // MARK: - UI Actions
-
-    private func processAudioFiles() {
-        let panel = NSOpenPanel()
-        panel.title = "Select Audio or Video Files"
-        panel.allowedContentTypes = AudioImportTypes.pickerTypes(
-            ffmpegAvailable: FFmpegHelper.isAvailable,
-        )
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-
-        let pairingDelegate = PairedImportPanelDelegate()
-        panel.delegate = pairingDelegate
-        panel.accessoryView = pairingDelegate.accessoryView
-        panel.isAccessoryViewDisclosed = true
-
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-        appState.pipeline.enqueueFiles(panel.urls)
-    }
 
     private func openLastProtocol() {
         if let job = appState.pipeline.queue.completedJobs.last,

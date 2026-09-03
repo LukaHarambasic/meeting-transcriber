@@ -52,7 +52,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: onNameSpeakers,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -217,7 +216,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: { called = true },
         )
@@ -241,7 +239,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: { called = true },
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -265,7 +262,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: { called = true },
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -289,7 +285,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -313,7 +308,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: { called = true },
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -373,7 +367,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -409,36 +402,11 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Dismiss"))
-    }
-
-    func testProcessFilesButtonCallsCallback() throws {
-        var called = false
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onNameSpeakers: nil,
-            onProcessFiles: { called = true },
-            onDismissJob: { _ in },
-            onQuit: {},
-        )
-        let body = try sut.inspect()
-        try body.find(button: "Process Audio/Video Files...").tap()
-        XCTAssertTrue(called)
     }
 
     func testDismissButtonCallsCallbackWithJobID() throws {
@@ -468,7 +436,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { dismissedID = $0 },
             onQuit: {},
         )
@@ -503,7 +470,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -540,7 +506,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -578,7 +543,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -623,7 +587,6 @@ final class MenuBarViewTests: XCTestCase {
     func testProcessFilesButtonAlwaysExists() throws {
         let sut = makeView(status: makeStatus(state: .idle))
         let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Process Audio/Video Files..."))
     }
 
     // MARK: - Error job display
@@ -652,7 +615,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
@@ -790,7 +752,6 @@ final class MenuBarViewTests: XCTestCase {
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onProcessFiles: {},
             onDismissJob: { _ in },
             onQuit: {},
         )
