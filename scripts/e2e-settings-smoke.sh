@@ -53,7 +53,11 @@ fi
 step "Build Homebrew .app (ad-hoc signed)"
 kill_app
 sleep 1
-"$REPO_ROOT/scripts/build_release.sh" --no-notarize >/dev/null
+# --no-install: this lane launches the bundle from `.build` and asserts against
+# it. Letting the build install into /Applications would replace the developer's
+# working app as a side effect of running a smoke test, and would leave a second
+# copy for the test's own launch to be confused with.
+"$REPO_ROOT/scripts/build_release.sh" --no-notarize --no-install >/dev/null
 [ -d "$APP" ] || fail "no app bundle at $APP"
 ok "built $APP"
 

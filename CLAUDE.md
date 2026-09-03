@@ -51,6 +51,16 @@ Single-source: Audio/Video → 16kHz mono (AVAudioFile → AVAsset → ffmpeg fa
 ./scripts/run_app.sh
 ```
 
+**Neither build script installs anywhere.** `run_app.sh` builds and launches
+`app/MeetingTranscriber/.build/MeetingTranscriber-Dev.app` **in place**; `build_release.sh` builds
+`MeetingTranscriber.app` into the build dir and wraps it in a DMG. Copying to `/Applications` or
+`~/Applications` is a manual step, so a machine can end up with two dev bundles at different paths
+— and **TCC keys grants to path + signature, so a Screen Recording grant given to one does not
+apply to the other**. Symptom: recording silently refuses again after a rebuild or after switching
+which copy you launch. Check which is running before diagnosing a permission problem:
+`lsof -a -p <pid> -d txt -Fn`. Ad-hoc signing also means each rebuild can invalidate the grant on
+the same path.
+
 ## Key Commands
 
 ```bash
@@ -77,7 +87,10 @@ gh workflow run quality-and-safety.yml -f run-sanitizer=true -f run-quality=fals
 
 # On a Mac without Xcode, lint.sh's SwiftLint half dies in sourcekitd (it does not
 # propagate DYLD_FRAMEWORK_PATH). Trust it for SwiftFormat, run SwiftLint by hand —
-# from the REPO ROOT, or it lints .build/checkouts and reports ViewInspector's style:
+# from the REPO ROOT. Run from app/MeetingTranscriber and it finds no .swiftlint.yml,
+# so it lints .build/checkouts AND applies SwiftLint's DEFAULT thresholds to our files
+# (file_length 400 not 600, line_length 120 not 160, identifier_name min 3 not 1) —
+# plausible-looking violations in files you just touched, none of them real:
 DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/usr/lib swiftlint lint --strict
 
 # The `analyze` CI job (swiftlint's ANALYZER rules, incl. unused_declaration) cannot run

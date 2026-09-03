@@ -3,9 +3,11 @@
 #
 # Usage:
 #   ./scripts/build_release.sh [--no-notarize] [--staple] [--appstore]
+#                              [--install | --no-install]
 #
 # Output:
 #   .build/release/MeetingTranscriber.dmg
+#   /Applications/MeetingTranscriber.app   (local runs; see --no-install)
 #
 # Requirements:
 #   - macOS 14+ (Sonoma) on Apple Silicon
@@ -44,15 +46,33 @@ CONTENTS="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 
+INSTALL_DIR="/Applications"
+INSTALLED_APP="$INSTALL_DIR/MeetingTranscriber.app"
+
 NOTARIZE=true
 STAPLE=false
 APPSTORE=false
 OVERRIDE_VERSION=""
+# Installing into /Applications is the DEFAULT for a local run, because a
+# release build that stays in `.build` is not a release anyone can use, and the
+# manual copy that filled that gap is what let a second, differently-named
+# bundle accumulate at another path (see the TCC note in CLAUDE.md → Setup).
+# Turned off automatically for every context where installing is wrong:
+#   - CI: the runner wants the DMG artifact, not a local install;
+#   - Homebrew (HOMEBREW_TEMP): the cask does its own placement;
+#   - --appstore: that bundle is for submission and carries the sandbox
+#     entitlements, so installing it would replace the working app with one
+#     that has no Claude CLI and no automation API.
+INSTALL=true
+[ -n "${CI:-}" ] && INSTALL=false
+[ -n "${HOMEBREW_TEMP:-}" ] && INSTALL=false
 for arg in "$@"; do
     case "$arg" in
         --no-notarize) NOTARIZE=false ;;
         --staple) STAPLE=true ;;
-        --appstore) APPSTORE=true ;;
+        --appstore) APPSTORE=true; INSTALL=false ;;
+        --install) INSTALL=true ;;
+        --no-install) INSTALL=false ;;
         --version=*) OVERRIDE_VERSION="${arg#--version=}" ;;
     esac
 done
@@ -67,6 +87,13 @@ echo "Building MeetingTranscriber v${VERSION}"
 echo "  Notarize:    $NOTARIZE"
 echo "  Staple:      $STAPLE"
 echo "  App Store:   $APPSTORE"
+# Not `${INSTALL:+…}`: INSTALL is the string "false" when off, which is set and
+# non-empty, so that form would print a destination the build is not using.
+if [ "$INSTALL" = true ]; then
+    echo "  Install:     yes → $INSTALLED_APP"
+else
+    echo "  Install:     no"
+fi
 echo "======================================="
 
 # ── Step 0: Clean previous build ─────────────────────────────────────────────
@@ -264,6 +291,67 @@ else
     echo "Step 4: Skipping DMG (Homebrew mode)"
 fi
 
+# ── Step 6: Install into /Applications ────────────────────────────────────────
+#
+# Runs last on purpose: the DMG step moves $APP_BUNDLE into a staging directory
+# and back, so anything that reads the bundle has to come after it.
+
+if [ "$INSTALL" = true ]; then
+    echo ""
+    echo "Step 6: Installing to $INSTALL_DIR..."
+
+    # /Applications is group-writable by admin on macOS, so no sudo. Fail loudly
+    # rather than half-installing if this machine is set up differently.
+    if [ ! -w "$INSTALL_DIR" ]; then
+        echo "  ERROR: $INSTALL_DIR is not writable. Re-run with --no-install," >&2
+        echo "         or copy $APP_BUNDLE there by hand." >&2
+        exit 1
+    fi
+
+    # Quit a running copy first: replacing the bundle under a live process
+    # leaves it running the deleted binary, so the old code keeps serving while
+    # every check says the new one is installed. Graceful quit, because a
+    # SIGKILL mid-recording would lose the in-progress tracks.
+    RELEASE_BUNDLE_ID_LOCAL="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+        "$PROJECT_ROOT/app/MeetingTranscriber/Sources/Info.plist")"
+    if pgrep -f "$INSTALLED_APP/Contents/MacOS/" >/dev/null 2>&1; then
+        echo "  Quitting the running copy..."
+        osascript -e "quit app id \"$RELEASE_BUNDLE_ID_LOCAL\"" 2>/dev/null || true
+        for _ in $(seq 1 20); do
+            pgrep -f "$INSTALLED_APP/Contents/MacOS/" >/dev/null 2>&1 || break
+            sleep 0.5
+        done
+        if pgrep -f "$INSTALLED_APP/Contents/MacOS/" >/dev/null 2>&1; then
+            echo "  ERROR: the running app did not quit; not replacing it." >&2
+            exit 1
+        fi
+    fi
+
+    # ditto, not cp -R: it preserves the code signature's extended attributes.
+    # A cp-ed bundle can fail Gatekeeper for reasons that look like a signing bug.
+    rm -rf "$INSTALLED_APP"
+    ditto "$APP_BUNDLE" "$INSTALLED_APP"
+
+    # Launch Services caches the bundle's name and icon by path; without this a
+    # replaced bundle can keep showing the previous name in Finder and the Dock.
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -f "$INSTALLED_APP" 2>/dev/null || true
+
+    echo "  Installed: $INSTALLED_APP"
+
+    # A dev bundle left behind is the two-copies trap: TCC keys grants to path +
+    # signature, so the grants given to one do not apply to the other, and both
+    # show a menu-bar icon. Name it rather than delete it — it is not this
+    # script's to remove.
+    for DEV_COPY in "$HOME/Applications/MeetingTranscriber-Dev.app" \
+        "$PROJECT_ROOT/app/MeetingTranscriber/.build/MeetingTranscriber-Dev.app"; do
+        if [ -d "$DEV_COPY" ]; then
+            echo "  NOTE: a dev bundle still exists at $DEV_COPY"
+            echo "        It has its own TCC grants and its own menu-bar icon."
+        fi
+    done
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
@@ -275,4 +363,7 @@ if [ -f "$DMG_PATH" ]; then
     echo "DMG:        $DMG_PATH ($DMG_SIZE)"
     echo ""
     echo "To test: open $DMG_PATH"
+fi
+if [ "$INSTALL" = true ]; then
+    echo "Installed:  $INSTALLED_APP"
 fi
