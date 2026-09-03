@@ -515,12 +515,6 @@ final class AppState {
         currentIssue != nil
     }
 
-    /// When the live recording started, or nil when nothing is recording.
-    /// Drives the menu header's elapsed counter.
-    var recordingStartedAt: Date? {
-        watching.watchLoop?.recordingStartedAt
-    }
-
     // Internal (not private): also formats `postedAt` in the RPC snapshot
     // extension (AppState+RPC.swift), where file-private wouldn't reach.
     static let isoFormatter = ISO8601DateFormatter()

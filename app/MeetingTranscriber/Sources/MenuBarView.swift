@@ -7,10 +7,6 @@ struct MenuBarView: View {
     /// a problem that *stops* recordings from starting — a denied grant, the
     /// exact case the user hit — could never be shown through it.
     let issue: RecordingIssue?
-    /// When the live recording started, or nil when nothing is recording. Drives
-    /// the header's elapsed counter — the one fact about a running recording the
-    /// menu can add.
-    let recordingStartedAt: Date?
     let pipelineQueue: PipelineQueue
     var updateChecker: UpdateChecker?
     let onRecordMeeting: () -> Void
@@ -39,11 +35,13 @@ struct MenuBarView: View {
     // the analyze build enforces (-warn-long-expression-type-checking=300 with
     // -warnings-as-errors), failing the build on slower CI hardware. The view
     // order, dividers, and conditionals are unchanged.
+    // No status header. An idle app has nothing to say, and the row that said
+    // "Idle" cost two menu items: a `Label`/`HStack` of icon plus text is
+    // flattened by a menu into one row per control, so the icon and the word
+    // landed on separate lines. What the app is doing is already legible from
+    // the controls (Record vs Stop Recording) and from the queue rows.
     var body: some View {
-        statusHeader
         issueInfo
-
-        Divider()
 
         recordControls
         processingQueue
@@ -64,33 +62,6 @@ struct MenuBarView: View {
 
     // MARK: - Body sections
 
-    /// One line: what the app is doing, and for a recording how long it has been
-    /// doing it.
-    ///
-    /// This replaces four rows that all said the same thing. A live recording
-    /// rendered `state.label` ("Recording"), then `status.detail` ("Recording:
-    /// Meeting Recording"), then `meeting.title` ("Meeting Recording"), then
-    /// `meetingLabel` ("Meeting") — the same fact four times, none of it
-    /// actionable, and the meeting block was placeholder text for the
-    /// system-wide recording that has no single app to name.
-    ///
-    /// The elapsed time is the one thing a running recording can tell you that
-    /// you do not already know. `Text(_:style:.timer)` updates itself, so it
-    /// needs no timer of ours and cannot go stale while the menu is open.
-    private var statusHeader: some View {
-        HStack(spacing: 6) {
-            Image(systemName: state.icon)
-            Text(state.label)
-            if let startedAt = recordingStartedAt {
-                Text(startedAt, style: .timer)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .font(.headline)
-        .padding(.horizontal, 4)
-    }
-
     /// The problem, in one line, followed by the button that fixes it.
     ///
     /// It replaces a row that only rendered `status?.error` while the state was
@@ -105,13 +76,15 @@ struct MenuBarView: View {
     /// stretch across the display in the first place.
     @ViewBuilder private var issueInfo: some View {
         if let issue {
-            Divider()
             Text(issue.headline)
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.red)
                 .padding(.horizontal, 4)
             issueRemedyButton(issue)
+            // After, not before: with no header above it, a leading `Divider()`
+            // would draw a rule across the very top of the menu.
+            Divider()
         }
     }
 

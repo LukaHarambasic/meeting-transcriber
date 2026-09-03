@@ -91,7 +91,6 @@ struct MeetingTranscriberApp: App {
             MenuBarView(
                 status: appState.currentStatus,
                 issue: appState.currentIssue,
-                recordingStartedAt: appState.recordingStartedAt,
                 pipelineQueue: appState.pipelineQueue,
                 updateChecker: appState.updateChecker,
                 onRecordMeeting: { appState.watching.startMeetingRecording() },

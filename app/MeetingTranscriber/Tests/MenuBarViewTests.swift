@@ -32,7 +32,6 @@ final class MenuBarViewTests: XCTestCase {
     private func makeView(
         status: TranscriberStatus? = nil,
         issue: RecordingIssue? = nil,
-        recordingStartedAt: Date? = nil,
         pipelineQueue: PipelineQueue? = nil,
         updateChecker: UpdateChecker? = nil,
         onNameSpeakers: (() -> Void)? = nil,
@@ -43,7 +42,6 @@ final class MenuBarViewTests: XCTestCase {
         MenuBarView(
             status: status,
             issue: issue,
-            recordingStartedAt: recordingStartedAt,
             pipelineQueue: pipelineQueue ?? PipelineQueue(),
             updateChecker: updateChecker,
             onRecordMeeting: onRecordMeeting,
@@ -60,19 +58,27 @@ final class MenuBarViewTests: XCTestCase {
         )
     }
 
-    // MARK: - Header
+    // MARK: - No status header
 
-    /// The header is deliberately one line. A recording used to render its state
-    /// label, `status.detail`, the meeting title and the app name — the same fact
-    /// four times, which is what "the UI still looks horrible" was about.
-    func testHeaderDoesNotRepeatTheMeetingBlock() throws {
+    /// There is deliberately no status header at all.
+    ///
+    /// It once rendered the state label, `status.detail`, the meeting title and
+    /// the app name: the same fact four times. Condensing it to one line was not
+    /// enough either, because a menu flattens a `Label`/`HStack` into one row
+    /// per control, so the icon and the word "Idle" landed on separate rows for
+    /// an app that had nothing to report. What the app is doing is legible from
+    /// the controls (Record vs Stop Recording) and from the queue rows.
+    func testNoStatusHeaderIsRendered() throws {
         let meeting = MeetingInfo(app: "Teams", title: "Standup", pid: 123)
         let sut = makeView(status: makeStatus(state: .recording, detail: "Recording: Standup", meeting: meeting))
         let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: TranscriberState.recording.label))
         XCTAssertThrowsError(try body.find(text: "Standup"), "the meeting title duplicated the state line")
         XCTAssertThrowsError(try body.find(text: "Recording: Standup"), "the detail duplicated it again")
         XCTAssertThrowsError(try body.find(text: "Teams (PID 123)"), "the app name duplicated it a third time")
+        XCTAssertThrowsError(
+            try body.find(text: TranscriberState.idle.label),
+            "an idle app must not spend a menu row saying so",
+        )
     }
 
     // MARK: - Issue display
@@ -201,7 +207,6 @@ final class MenuBarViewTests: XCTestCase {
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
             issue: nil,
-            recordingStartedAt: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -226,7 +231,6 @@ final class MenuBarViewTests: XCTestCase {
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
             issue: nil,
-            recordingStartedAt: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -251,7 +255,6 @@ final class MenuBarViewTests: XCTestCase {
         let sut = MenuBarView(
             status: makeStatus(state: .idle),
             issue: nil,
-            recordingStartedAt: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -276,7 +279,6 @@ final class MenuBarViewTests: XCTestCase {
         let sut = MenuBarView(
             status: makeStatus(state: .protocolReady, protocolPath: "/tmp/p.md"),
             issue: nil,
-            recordingStartedAt: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -301,7 +303,6 @@ final class MenuBarViewTests: XCTestCase {
         let sut = MenuBarView(
             status: makeStatus(state: .waitingForSpeakerNames),
             issue: nil,
-            recordingStartedAt: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -421,7 +422,6 @@ final class MenuBarViewTests: XCTestCase {
         let sut = MenuBarView(
             status: makeStatus(),
             issue: nil,
-            recordingStartedAt: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
@@ -568,7 +568,6 @@ final class MenuBarViewTests: XCTestCase {
         let sut = MenuBarView(
             status: makeStatus(state: .recording),
             issue: nil,
-            recordingStartedAt: nil,
             pipelineQueue: PipelineQueue(),
             updateChecker: nil,
             onRecordMeeting: {},
