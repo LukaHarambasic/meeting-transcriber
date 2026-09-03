@@ -131,11 +131,31 @@ final class ProtocolFrontmatterTests: XCTestCase {
 
     // MARK: - Speaker derivation
 
+    /// The bug this replaced: the real transcript is `[00:01] Luka: text`, the
+    /// bracket is a timestamp, and reading it as the label produced
+    /// `speakers: ["00:01"]` — a label no renaming tool could ever match.
+    func testTimestampedLineYieldsTheNameNotTheTimestamp() {
+        XCTAssertEqual(
+            ProtocolFrontmatter.speakerLabel(inLine: "[00:01] Luka: Here we go again."),
+            "Luka",
+        )
+        XCTAssertEqual(
+            ProtocolFrontmatter.speakerLabel(inLine: "[1:02:03] Speaker 2: hello"),
+            "Speaker 2",
+            "an hours-long meeting's timestamp still reads as a timestamp",
+        )
+    }
+
+    /// The other real shape: diarized but unnamed, no timestamp.
+    func testUnstampedBracketIsTheLabel() {
+        XCTAssertEqual(ProtocolFrontmatter.speakerLabel(inLine: "[Speaker 1] hi"), "Speaker 1")
+    }
+
     func testSpeakersAreTakenInFirstAppearanceOrder() {
         let transcript = """
-        [Speaker 2] hello
-        [Speaker 1] hi
-        [Speaker 2] again
+        [00:01] Speaker 2: hello
+        [00:04] Speaker 1: hi
+        [00:09] Speaker 2: again
         """
         XCTAssertEqual(
             ProtocolFrontmatter.speakers(inTranscript: transcript),
@@ -151,10 +171,24 @@ final class ProtocolFrontmatterTests: XCTestCase {
     /// A line missing its closing bracket must not swallow the rest of the
     /// transcript into one enormous "speaker".
     func testMalformedLabelIsIgnored() {
+        XCTAssertNil(ProtocolFrontmatter.speakerLabel(inLine: "[Speaker 1 hello"))
         XCTAssertEqual(ProtocolFrontmatter.speakers(inTranscript: "[Speaker 1 hello\nworld"), [])
     }
 
     func testEmptyLabelIsIgnored() {
-        XCTAssertEqual(ProtocolFrontmatter.speakers(inTranscript: "[] hello"), [])
+        XCTAssertNil(ProtocolFrontmatter.speakerLabel(inLine: "[] hello"))
+    }
+
+    /// A timestamped line with no `Name:` carries no speaker, and must not fall
+    /// back to grabbing prose up to some later colon.
+    func testTimestampWithNoSpeakerYieldsNothing() {
+        XCTAssertNil(ProtocolFrontmatter.speakerLabel(inLine: "[00:01] just narration, no name"))
+    }
+
+    /// The length cap: a line whose colon sits deep in the prose must not turn
+    /// a whole sentence into a speaker name.
+    func testOverlongCandidateIsRejected() {
+        let line = "[00:01] " + String(repeating: "a", count: 60) + ": text"
+        XCTAssertNil(ProtocolFrontmatter.speakerLabel(inLine: line))
     }
 }

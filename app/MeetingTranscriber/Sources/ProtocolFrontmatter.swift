@@ -136,22 +136,59 @@ struct ProtocolFrontmatter: Equatable {
 
     /// Speaker labels in the order they first appear in the transcript.
     ///
-    /// Reads the `[Label]` prefixes the diarization stage writes. First-appearance
-    /// order rather than sorted, so `speakers` reads the way the meeting did and
-    /// "Speaker 1" is the one who spoke first.
+    /// The transcript's real shape is `[00:01] Luka: text` — the bracket holds a
+    /// **timestamp**, and the speaker follows it. The first version of this read
+    /// the bracket as the label and produced `speakers: ["00:01"]`, which is
+    /// worse than producing nothing: a renaming tool would have gone looking for
+    /// a speaker called "00:01".
     ///
-    /// The pattern deliberately excludes `]` from the label, so a malformed line
-    /// cannot swallow the rest of the transcript into one enormous "speaker".
+    /// Both shapes are handled, because the un-timestamped `[Label] text` form
+    /// is what a diarized-but-unnamed transcript looks like:
+    /// - `[00:01] Luka: text`  → `Luka`
+    /// - `[Speaker 1] text`    → `Speaker 1`
+    ///
+    /// First-appearance order rather than sorted, so `speakers` reads the way
+    /// the meeting did.
     static func speakers(inTranscript transcript: String) -> [String] {
         var seen = Set<String>()
         var ordered: [String] = []
         for line in transcript.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard line.hasPrefix("["), let close = line.firstIndex(of: "]") else { continue }
-            let label = String(line[line.index(after: line.startIndex) ..< close])
-            guard !label.isEmpty, seen.insert(label).inserted else { continue }
+            guard let label = speakerLabel(inLine: String(line)),
+                  seen.insert(label).inserted
+            else { continue }
             ordered.append(label)
         }
         return ordered
+    }
+
+    /// The speaker on one transcript line, or nil if it carries none.
+    ///
+    /// Internal rather than private so the two shapes can be asserted directly;
+    /// the timestamp case is the one that was wrong.
+    static func speakerLabel(inLine line: String) -> String? {
+        guard line.hasPrefix("["), let close = line.firstIndex(of: "]") else { return nil }
+        let inner = String(line[line.index(after: line.startIndex) ..< close])
+        guard !inner.isEmpty else { return nil }
+
+        // A bracket of digits and colons is a timestamp, so the speaker is the
+        // `Name:` that follows it.
+        if !isTimestamp(inner) {
+            return inner
+        }
+        let rest = line[line.index(after: close)...].drop { $0 == " " }
+        guard let colon = rest.firstIndex(of: ":") else { return nil }
+        let name = rest[..<colon].trimmingCharacters(in: .whitespaces)
+        // A cap, because a line with no speaker but a colon later in the prose
+        // would otherwise yield a sentence as a "speaker".
+        guard !name.isEmpty, name.count <= 40 else { return nil }
+        return name
+    }
+
+    /// Whether a bracket's contents are a timestamp rather than a name.
+    /// Deliberately shape-based (digits and colons only) rather than a strict
+    /// `HH:MM:SS` match, so an hours-long meeting's `1:02:03` counts too.
+    private static func isTimestamp(_ value: String) -> Bool {
+        value.allSatisfy { $0.isNumber || $0 == ":" } && value.contains(":")
     }
 
     // Pinned POSIX/Gregorian: these are machine-read fields, so a regional
