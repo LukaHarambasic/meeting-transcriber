@@ -75,6 +75,19 @@ gh workflow run quality-and-safety.yml -f run-sanitizer=true -f run-quality=fals
 # Lint & format auto-fix (SwiftFormat + SwiftLint --fix)
 ./scripts/lint.sh --fix
 
+# On a Mac without Xcode, lint.sh's SwiftLint half dies in sourcekitd (it does not
+# propagate DYLD_FRAMEWORK_PATH). Trust it for SwiftFormat, run SwiftLint by hand —
+# from the REPO ROOT, or it lints .build/checkouts and reports ViewInspector's style:
+DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/usr/lib swiftlint lint --strict
+
+# The `analyze` CI job (swiftlint's ANALYZER rules, incl. unused_declaration) cannot run
+# without Xcode at all — it needs an `xcodebuild build-for-testing` compiler log. It is
+# also the job whose failure cancels both `test` jobs, so one dead declaration means the
+# suite never runs. Before pushing, grep every declaration you added for a call site.
+# Two shapes that look used and are not:
+#   - a protocol requirement only ever read through a CONCRETE type (test doubles), and
+#   - test-only API for a test you did not end up writing.
+
 # Pre-push parity check (release build — catches Sendable diagnostics
 # that debug-mode tolerates; flags App Store variant when --with-appstore)
 ./scripts/pre-push.sh
@@ -116,6 +129,11 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 ## Conventions
 
 - All code and UI text in English
+- **The 300 ms type-check budget is warnings-as-errors, and plain code trips it.** Interpolating a
+  conversion into a `+`-concatenated multi-line string literal (`"… \(Int(x / 60)) …" + "…"`) cost
+  1.8 s in one function. Fix by hoisting to explicitly-typed locals (`let n: Int = …`) and
+  concatenating those, not by disabling the flag. Same family as the SwiftUI `body` splits already
+  documented across `MenuBarView` / `AppState` — it is not a SwiftUI-only trap.
 - Protocol output language configurable via `AppSettings.protocolLanguage` (default: English —
   this is a personal variant of the upstream project, whose owner's meetings are always English;
   upstream defaults to German. `AppSettings.whisperLanguage` likewise defaults to `en` here)
