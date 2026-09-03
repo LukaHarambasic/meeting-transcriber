@@ -24,7 +24,7 @@ struct GeneralSettingsView: View {
 
     private var recordOnlyBanner: some View {
         let display = OutputSettingsLogic.displayPath(
-            for: settings.effectiveOutputDir.appendingPathComponent("recordings"),
+            for: OutputLayout.workDir(in: settings.effectiveOutputDir),
             home: FileManager.default.homeDirectoryForCurrentUser,
         )
         return Label {

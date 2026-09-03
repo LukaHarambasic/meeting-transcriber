@@ -77,7 +77,7 @@ struct OutputSettingsView: View {
             }
             .accessibilityIdentifier(A11yID.outputFolderSection)
 
-            Section("Protocol Generation") {
+            Section("Transcript Generation") {
                 Picker("LLM Provider", selection: $settings.protocolProvider) {
                     ForEach(ProtocolProvider.allCases, id: \.self) { provider in
                         Text(provider.label).tag(provider)
@@ -86,7 +86,7 @@ struct OutputSettingsView: View {
 
                 providerConfigView
 
-                Picker("Protocol Language", selection: $settings.protocolLanguage) {
+                Picker("Transcript Language", selection: $settings.protocolLanguage) {
                     ForEach(AppSettings.protocolLanguages, id: \.self) { lang in
                         Text(lang).tag(lang)
                     }

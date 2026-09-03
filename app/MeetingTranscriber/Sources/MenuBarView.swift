@@ -192,7 +192,7 @@ struct MenuBarView: View {
             Button {
                 onOpenLastProtocol()
             } label: {
-                Label("Open Last Protocol", systemImage: "doc.text")
+                Label("Open Last Transcript", systemImage: "doc.text")
             }
             .keyboardShortcut("o")
             .disabled(protocolPath.isEmpty)
@@ -201,7 +201,7 @@ struct MenuBarView: View {
         Button {
             onOpenProtocolsFolder()
         } label: {
-            Label("Open Protocols Folder", systemImage: "folder")
+            Label("Open Transcripts Folder", systemImage: "folder")
         }
     }
 

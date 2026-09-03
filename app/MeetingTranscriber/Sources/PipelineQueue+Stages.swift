@@ -128,7 +128,7 @@ extension PipelineQueue {
     private func saveTranscriptDraft(_ transcript: String, ctx: JobContext, outputDir: URL) {
         _ = try? ProtocolGenerator.saveTranscript(
             transcript, basename: ctx.slug,
-            dir: outputDir.appendingPathComponent("protocols"),
+            dir: OutputLayout.transcriptsDir(in: outputDir),
         )
     }
 
@@ -629,7 +629,7 @@ extension PipelineQueue {
         ctx: JobContext, workDir: URL, outputDir: URL,
     ) async throws {
         // --- Save Transcript & Audio (always) ---
-        let protocolsDir = outputDir.appendingPathComponent("protocols")
+        let protocolsDir = OutputLayout.transcriptsDir(in: outputDir)
         let txtPath = try ProtocolGenerator.saveTranscript(finalTranscript, basename: ctx.slug, dir: protocolsDir)
         logger.info("[\(ctx.shortID, privacy: .public)] transcript_saved file=\(txtPath.lastPathComponent, privacy: .private)")
 
@@ -638,8 +638,8 @@ extension PipelineQueue {
             jobs[idx].namingSlug = ctx.slug
         }
 
-        let recordingsDir = outputDir.appendingPathComponent("recordings")
-        Self.persistAudioToOutput(ctx: ctx, outputDir: recordingsDir, stagingDir: stagingDir)
+        let recordingsDir = OutputLayout.workDir(in: outputDir)
+        Self.discardAppProducedAudio(ctx: ctx, stagingDir: stagingDir)
 
         // --- Persist 16kHz audio for re-diarization (move instead of copy to avoid double I/O) ---
         try? FileManager.default.moveItem(
@@ -782,11 +782,28 @@ extension PipelineQueue {
             logger.info("[\(shortID, privacy: .public)] protocol_saved file=\(mdPath.lastPathComponent, privacy: .private)")
             if let idx = jobs.firstIndex(where: { $0.id == jobID }) {
                 jobs[idx].protocolPath = mdPath
+                // The `.txt` was only ever an intermediate: the `.md` contains
+                // the same transcript under "Full Transcript", so keeping both
+                // put two files per meeting in a folder meant to hold one.
+                //
+                // Deleted here and nowhere else, because here is the only point
+                // where the `.md` is known to exist. Protocol generation can
+                // fail (the catch below warns "transcript saved"), and on that
+                // path the `.txt` is the only copy of the words.
+                //
+                // Cost, accepted: late speaker re-confirmation reads this file
+                // to regenerate a protocol with corrected names, so it can no
+                // longer do that. Renaming now happens against the `.md`, whose
+                // frontmatter lists the speaker labels to swap.
+                if let txtPath = jobs[idx].transcriptPath {
+                    try? FileManager.default.removeItem(at: txtPath)
+                    jobs[idx].transcriptPath = nil
+                }
             }
             stopElapsedTimer()
         } catch {
             logger.warning("[\(shortID, privacy: .public)] protocol_generation_failed error=\(error.localizedDescription, privacy: .public)")
-            addWarning(id: jobID, "Protocol generation failed; transcript saved")
+            addWarning(id: jobID, "Transcript generation failed; raw text saved")
             stopElapsedTimer()
         }
     }
@@ -832,73 +849,45 @@ extension PipelineQueue {
     /// directory, per `AudioPersistencePolicy`. Nil `mixPath` (paired imports
     /// without a `_mix.wav` source) → mix slot is skipped, no persistent mix is
     /// written.
-    private static func persistAudioToOutput(ctx: JobContext, outputDir: URL, stagingDir: URL) {
-        let (mixPath, appPath, micPath) = (ctx.mixPath, ctx.appPath, ctx.micPath)
-        // Each move below renames-in-place — if two of the three URLs point at
-        // the same file, the first move destroys the source for the next one.
-        // Loud failure in dev/CI > silent data destruction.
-        if let mixStd = mixPath?.standardizedFileURL {
-            precondition(
-                appPath.map { mixStd != $0.standardizedFileURL } ?? true,
-                "persistAudioToOutput: mixPath aliases appPath — would destroy source",
-            )
-            precondition(
-                micPath.map { mixStd != $0.standardizedFileURL } ?? true,
-                "persistAudioToOutput: mixPath aliases micPath — would destroy source",
-            )
-        }
-
-        let accessing = outputDir.startAccessingSecurityScopedResource()
-        defer { if accessing { outputDir.stopAccessingSecurityScopedResource() } }
-
+    /// Delete the source audio this app recorded, now that its transcript
+    /// exists.
+    ///
+    /// It used to be relocated into `<outputDir>/recordings`, which left the
+    /// output folder holding multi-megabyte WAVs beside the transcripts that
+    /// replaced them. The transcript is the artifact; the recording was the
+    /// means.
+    ///
+    /// Only audio the app wrote is touched. A file the user picked reads as
+    /// `.leaveInPlace`, because deleting someone's own recording is not a
+    /// decision a transcription run gets to make — and it is the one mistake
+    /// here that cannot be undone.
+    private static func discardAppProducedAudio(ctx: JobContext, stagingDir: URL) {
         let fm = FileManager.default
-        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
-        // Reuse the job's single basename so the audio copies match the
-        // transcript/protocol stems exactly (same meeting-start stamp + shortID).
-        let audioPaths: [(URL, String)] = [
-            mixPath.map { ($0, "\(ctx.slug)\(RecordingFileSuffix.mix)") },
-            appPath.map { ($0, "\(ctx.slug)\(RecordingFileSuffix.app)") },
-            micPath.map { ($0, "\(ctx.slug)\(RecordingFileSuffix.mic)") },
-        ].compactMap(\.self)
-
-        for (src, name) in audioPaths {
-            let dst = outputDir.appendingPathComponent(name)
+        let sources = [ctx.mixPath, ctx.appPath, ctx.micPath].compactMap(\.self)
+        for src in sources {
             switch AudioPersistencePolicy.action(
-                source: src, stagingDir: stagingDir, destinationDir: outputDir,
+                source: src, stagingDir: stagingDir, destinationDir: stagingDir,
             ) {
-            case .alreadyAtDestination:
-                // Moving would just rename in place with a fresh
-                // `<today_timestamp>_<title>` prefix, which produces an endless
-                // compounding-rename loop on every re-import (orphan recovery
-                // re-picks the new name on next launch).
-                logger.info("Audio already in output dir, skipping rename: \(src.lastPathComponent, privacy: .private)")
+            case .leaveInPlace, .alreadyAtDestination:
+                // `.alreadyAtDestination` is unreachable now that destination
+                // and staging are the same directory, and it is kept only
+                // because the enum is exhaustive here. Either way the answer is
+                // the same: not ours, do not touch it.
+                logger.info("Audio left in place: \(src.lastPathComponent, privacy: .private)")
                 continue
 
-            case .leaveInPlace:
-                logger.info("Imported audio left in place: \(src.lastPathComponent, privacy: .private)")
-                continue
-
-            case .move:
+            case .delete:
                 break
             }
-            // The policy decides from path shape alone, so a source another run
-            // of this job already relocated still reads as `.move`. Falling
-            // through would delete that run's destination copy and then fail the
-            // move on the missing source, and since staging audio is moved
-            // rather than copied, no copy would remain anywhere.
-            guard fm.fileExists(atPath: src.path) else {
-                logger.info("Audio already relocated, skipping: \(name, privacy: .private)")
-                continue
-            }
+            // A second run of the same job finds the file already gone. That is
+            // success, not an error worth reporting.
+            guard fm.fileExists(atPath: src.path) else { continue }
             do {
-                if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
-                try fm.moveItem(at: src, to: dst)
-                logger.info("Audio moved: \(name, privacy: .private)")
+                try fm.removeItem(at: src)
+                logger.info("Audio discarded after transcription: \(src.lastPathComponent, privacy: .private)")
             } catch {
-                // Error left redacted: a file-move CocoaError embeds the
-                // meeting-title-derived filename in its description (the same
-                // data the sibling .private annotation hides).
-                logger.warning("Failed to move audio \(name, privacy: .private): \(error.localizedDescription)")
+                // Redacted: a file CocoaError embeds the title-derived filename.
+                logger.warning("Could not discard audio: \(error.localizedDescription)")
             }
         }
     }

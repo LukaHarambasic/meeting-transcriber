@@ -246,7 +246,7 @@ final class SpeakerNamingSession {
             // Reachable when the transcript was moved or deleted between the
             // pipeline writing it and the user resolving naming: the caller's
             // readiness probe only checks that `transcriptPath` is non-nil.
-            delegate.addWarning(id: jobID, "Protocol not generated: the transcript file is missing")
+            delegate.addWarning(id: jobID, "Transcript not generated: the source text file is missing")
             finishIfUnresolved(jobID: jobID, delegate: delegate)
             return
         }
@@ -254,7 +254,7 @@ final class SpeakerNamingSession {
             jobID: jobID,
             transcript: transcript,
             title: job.meetingTitle,
-            protocolsDir: outputDir.appendingPathComponent("protocols"),
+            protocolsDir: OutputLayout.transcriptsDir(in: outputDir),
         )
         finishIfUnresolved(jobID: jobID, delegate: delegate)
     }
@@ -311,7 +311,7 @@ final class SpeakerNamingSession {
         logger.info("[recognition] \(matched.count) speakers, \(autoMatched) auto, \(matched.count - autoMatched) unknown")
 
         // Use persisted 16kHz path (survives workDir cleanup).
-        let persistedAudioPath = outputDir.appendingPathComponent("recordings")
+        let persistedAudioPath = OutputLayout.workDir(in: outputDir)
             .appendingPathComponent("\(slug)_16k.wav")
         let namingData = SpeakerNamingData(
             jobID: jobID,

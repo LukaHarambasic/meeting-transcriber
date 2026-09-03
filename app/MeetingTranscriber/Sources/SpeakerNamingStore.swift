@@ -31,7 +31,7 @@ struct SpeakerNamingStore {
     }
 
     private var recordingsDir: URL? {
-        outputDir?.appendingPathComponent("recordings")
+        outputDir.map { OutputLayout.workDir(in: $0) }
     }
 
     // FluidAudio embeddings can contain NaN/Inf for short or silent segments.

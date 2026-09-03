@@ -3,8 +3,14 @@ import Foundation
 /// What to do with a finished job's source audio when persisting its artifacts.
 enum AudioPersistenceAction: Equatable {
     /// The app produced this file in its own staging directory, so it is the
-    /// app's to relocate into the output folder.
-    case move
+    /// app's to dispose of once the transcript exists.
+    ///
+    /// Deleted rather than relocated: the transcript is the artifact, and a
+    /// folder of `.md` files beside a folder of multi-megabyte WAVs is not what
+    /// the output folder is for. Only ever reached for audio *this app wrote* —
+    /// a file the user picked is `.leaveInPlace`, because deleting someone's own
+    /// recording is not a decision a transcription run gets to make.
+    case delete
     /// The user picked this file from their own folder. Leave it alone.
     case leaveInPlace
     /// Already sitting in the destination directory; moving it would only
@@ -12,7 +18,7 @@ enum AudioPersistenceAction: Equatable {
     case alreadyAtDestination
 }
 
-/// Decides whether a job's source audio may be relocated when the job finishes.
+/// Decides what happens to a job's source audio when the job finishes.
 ///
 /// The distinction the pipeline needs is "did the app make this file, or did the
 /// user hand it to us". `DualSourceRecorder` writes into the staging directory,
@@ -48,6 +54,6 @@ enum AudioPersistencePolicy {
         if sourceDir == key(destinationDir) {
             return .alreadyAtDestination
         }
-        return sourceDir == key(stagingDir) ? .move : .leaveInPlace
+        return sourceDir == key(stagingDir) ? .delete : .leaveInPlace
     }
 }

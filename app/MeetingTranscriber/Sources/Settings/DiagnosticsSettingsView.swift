@@ -58,7 +58,7 @@ struct DiagnosticsSettingsView: View {
             // output is worth opening, but only once you can see which job it
             // belongs to and why it is flagged.
             if let path = job.protocolPath ?? job.transcriptPath {
-                Button("Open Protocol") { NSWorkspace.shared.open(path) }
+                Button("Open Transcript") { NSWorkspace.shared.open(path) }
                     .buttonStyle(.link)
             }
         }

@@ -86,6 +86,12 @@ struct SettingsView: View {
         case .output:
             OutputSettingsView(settings: settings)
 
+        case .transcripts:
+            TranscriptsSettingsView(
+                pipelineQueue: pipelineQueue,
+                onDismissJob: onDismissJob,
+            )
+
         case .diagnostics:
             DiagnosticsSettingsView(
                 pipelineQueue: pipelineQueue,
@@ -99,7 +105,7 @@ struct SettingsView: View {
 }
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, audio, transcription, speakers, output, diagnostics, advanced
+    case general, audio, transcription, transcripts, speakers, output, diagnostics, advanced
 
     var id: String {
         rawValue
@@ -112,6 +118,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .transcription: "Transcription"
         case .speakers: "Speakers"
         case .output: "Output"
+        case .transcripts: "Transcripts"
         case .diagnostics: "Diagnostics"
         case .advanced: "Advanced"
         }
@@ -124,6 +131,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .transcription: "waveform"
         case .speakers: "person.2"
         case .output: "doc.text"
+        case .transcripts: "doc.text"
         case .diagnostics: "stethoscope"
         case .advanced: "wrench.and.screwdriver"
         }

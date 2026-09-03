@@ -81,7 +81,7 @@ extension SpeakerNamingSession {
                         jobID: jobID,
                         transcript: transcript,
                         title: job.meetingTitle,
-                        protocolsDir: outputDir.appendingPathComponent("protocols"),
+                        protocolsDir: OutputLayout.transcriptsDir(in: outputDir),
                     )
                 }
             } catch {
@@ -107,7 +107,7 @@ extension SpeakerNamingSession {
         guard verdict == .affected, let outputDir, let slug else { return [] }
         let proven = AppTrackSilence.micSpeakersProvenClean(
             segments: namingData.segments,
-            appTrackURL: outputDir.appendingPathComponent("recordings")
+            appTrackURL: OutputLayout.workDir(in: outputDir)
                 .appendingPathComponent("\(slug)_app_16k.wav"),
         )
         if !proven.isEmpty {
@@ -148,7 +148,7 @@ extension SpeakerNamingSession {
             return
         }
 
-        let recordingsDir = outputDir.appendingPathComponent("recordings")
+        let recordingsDir = OutputLayout.workDir(in: outputDir)
         let diarizeProcess = resolveLateDiarizer(mode: mode, defaultFactory: diarizationFactory)
         guard diarizeProcess.isAvailable else {
             logger.warning("Diarization not available for late re-run")
@@ -310,7 +310,7 @@ extension SpeakerNamingSession {
     ) {
         guard let outputDir,
               let transcriptPath = delegate?.job(withID: jobID)?.transcriptPath else { return }
-        let recordingsDir = outputDir.appendingPathComponent("recordings")
+        let recordingsDir = OutputLayout.workDir(in: outputDir)
         guard let cachedSegments = loadCachedSegments(dir: recordingsDir, slug: slug) else {
             logger.warning("Late re-diarization: no persisted transcript segments — speaker labels not re-segmented")
             // Don't let the re-run silently appear to succeed: an older recording

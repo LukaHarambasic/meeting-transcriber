@@ -170,7 +170,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
 
         case .protocolReady:
             let meetingTitle = status.meeting?.title ?? "Meeting"
-            return ("Protocol Ready", "Protocol for \"\(meetingTitle)\" is ready.")
+            return ("Transcript Ready", "Transcript for \"\(meetingTitle)\" is ready.")
 
         case .waitingForSpeakerNames:
             return ("Name Speakers", "Speakers detected. Open the app to assign names.")
