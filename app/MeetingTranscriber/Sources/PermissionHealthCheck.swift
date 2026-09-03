@@ -36,7 +36,7 @@ enum PermissionProblem: Equatable {
 
     var description: String {
         isBroken
-            ? "\(permissionName) looks enabled but isn't working — toggle it off and on in System Settings"
+            ? "\(permissionName) looks enabled but is not working. Toggle it off and on in System Settings."
             : "\(permissionName) permission denied"
     }
 

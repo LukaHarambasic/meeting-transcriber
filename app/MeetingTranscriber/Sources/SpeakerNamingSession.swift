@@ -246,7 +246,7 @@ final class SpeakerNamingSession {
             // Reachable when the transcript was moved or deleted between the
             // pipeline writing it and the user resolving naming: the caller's
             // readiness probe only checks that `transcriptPath` is non-nil.
-            delegate.addWarning(id: jobID, "Protocol not generated — transcript file is missing")
+            delegate.addWarning(id: jobID, "Protocol not generated: the transcript file is missing")
             finishIfUnresolved(jobID: jobID, delegate: delegate)
             return
         }
@@ -376,7 +376,7 @@ final class SpeakerNamingSession {
             // Error left redacted: the write target is `<title-slug>_naming.json`,
             // so a file-write error description would leak the meeting title.
             logger.error("Failed to save naming data: \(error.localizedDescription)")
-            delegate?.addWarning(id: data.jobID, "Late re-confirm unavailable — naming data could not be persisted")
+            delegate?.addWarning(id: data.jobID, "Late re-confirm unavailable: naming data could not be persisted")
         }
     }
 

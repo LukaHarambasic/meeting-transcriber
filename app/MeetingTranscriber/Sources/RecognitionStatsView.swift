@@ -38,7 +38,7 @@ struct RecognitionStatsView: View {
                 if aggregate.total > 0 {
                     statsBody(aggregate)
                 } else {
-                    Text("No data yet — confirm a meeting to start collecting.")
+                    Text("No data yet. Confirm a meeting to start collecting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

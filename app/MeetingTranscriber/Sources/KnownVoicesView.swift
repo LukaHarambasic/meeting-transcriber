@@ -114,7 +114,7 @@ struct KnownVoicesView: View {
 
             actionButtonsRow
             if pipelineBusy, diarizerFactory != nil {
-                Text("Pipeline busy — diarization may be slower.")
+                Text("Pipeline busy, so diarization may be slower.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

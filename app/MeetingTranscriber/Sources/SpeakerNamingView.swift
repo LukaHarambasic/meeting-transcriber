@@ -198,7 +198,7 @@ struct SpeakerNamingView: View { // swiftlint:disable:this type_body_length
                 rerunButton
             }
             if currentDiarizerMode != nil, rerunMode == .sortformer {
-                Text("Sortformer caps at \(DiarizerMode.sortformer.speakerCap) speakers — switch to Offline for larger meetings.")
+                Text("Sortformer caps at \(DiarizerMode.sortformer.speakerCap) speakers. Switch to Offline for larger meetings.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier(A11yID.sortformerCapHint)
@@ -261,7 +261,7 @@ struct SpeakerNamingView: View { // swiftlint:disable:this type_body_length
     var body: some View {
         // swiftlint:disable:next closure_body_length
         VStack(spacing: 16) {
-            Text("Name Speakers — \"\(data.meetingTitle)\"")
+            Text("Name Speakers: \"\(data.meetingTitle)\"")
                 .font(.headline)
                 .padding(.top, 8)
 

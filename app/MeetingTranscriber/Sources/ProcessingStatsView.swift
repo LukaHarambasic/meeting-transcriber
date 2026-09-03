@@ -37,7 +37,7 @@ struct ProcessingStatsView: View {
 
             if let aggregates {
                 if aggregates.isEmpty {
-                    Text("No data yet — process a meeting to start collecting.")
+                    Text("No data yet. Process a meeting to start collecting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {

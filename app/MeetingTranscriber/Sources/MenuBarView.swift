@@ -91,17 +91,12 @@ struct MenuBarView: View {
         .padding(.horizontal, 4)
     }
 
-    /// The row that says what is wrong and offers the pane that fixes it.
-    ///
-    /// Replaces a row that only rendered `status?.error` while the state was
-    /// `.error`. That combination was unreachable for the failure that prompted
-    /// this: `status` is nil unless a recording is active, so a refusal to start
-    /// one showed nothing, and the user saw a red icon above the word "Idle"
-    /// with no explanation anywhere in the app.
-    ///
-    /// The remedy button is separate from the text block so it is a real menu
-    /// item the user can click, not a caption inside a `VStack`.
     /// The problem, in one line, followed by the button that fixes it.
+    ///
+    /// It replaces a row that only rendered `status?.error` while the state was
+    /// `.error` — unreachable for the failure that prompted it, since `status`
+    /// is nil unless a recording is active, so a refused start showed nothing
+    /// and the user saw a red icon above the word "Idle".
     ///
     /// The explanatory sentence that used to sit under the headline is gone.
     /// "Screen Recording permission denied" plus **Open Screen Recording
@@ -241,55 +236,91 @@ struct MenuBarView: View {
 
     // MARK: - Helpers
 
+    /// One job, one menu row.
+    ///
+    /// It used to be an `HStack` of a status dot, a two-line `VStack` and up to
+    /// three `Button`s. A menu cannot render that: SwiftUI flattens the controls
+    /// into separate rows, so a single finished job became a title row, a status
+    /// row and a bare "Dismiss" row with nothing tying them together — the
+    /// sprawling faded block that was reported. Long warning text widened the
+    /// menu on top of that.
+    ///
+    /// So: one `Button` per job, its label carrying title and state, and exactly
+    /// one action — the one that job's state actually affords. A running job has
+    /// no action, so its row is disabled rather than fabricating one.
     private func jobRow(_ job: PipelineJob) -> some View {
-        HStack {
-            Circle()
-                .fill(jobColor(job))
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading) {
-                Text(job.meetingTitle)
-                    .font(.caption)
-                jobStateLabel(job)
-            }
-            Spacer()
-            if job.state == .done, let path = job.protocolPath ?? job.transcriptPath {
-                Button("Open") { onOpenProtocol(path) }
-                    .font(.caption2)
-            }
-            if job.state == .speakerNamingPending {
-                Button("Name Speakers") { onNameSpeakers?() }
-                    .font(.caption2)
-            }
-            if job.state == .waiting || job.state == .transcribing
-                || job.state == .diarizing || job.state == .generatingProtocol {
-                Button("Cancel") { pipelineQueue.cancelJob(id: job.id) }
-                    .font(.caption2)
-            }
-            if job.state == .done || job.state == .error || job.state == .speakerNamingPending {
-                Button("Dismiss") { onDismissJob(job.id) }
-                    .font(.caption2)
-            }
+        Button {
+            jobAction(job)
+        } label: {
+            Label(jobRowTitle(job), systemImage: jobRowIcon(job))
         }
-        .padding(.horizontal, 4)
+        .disabled(!jobHasAction(job))
     }
 
-    private func jobStateLabel(_ job: PipelineJob) -> some View {
-        Group {
-            if [.transcribing, .diarizing, .generatingProtocol].contains(job.state) {
-                Text(stageProgressText(job))
-                    .foregroundStyle(.secondary)
-            } else if job.state == .error, let msg = job.error {
-                Text(msg)
-                    .foregroundStyle(.red)
-            } else if job.state == .done, !job.warnings.isEmpty {
-                Text(job.warnings.joined(separator: "; "))
-                    .foregroundStyle(.orange)
-            } else {
-                Text(job.state.label)
-                    .foregroundStyle(.secondary)
-            }
+    /// Title and state on one line, truncated. The state word is what changes;
+    /// repeating the meeting title on a second line added no information.
+    private func jobRowTitle(_ job: PipelineJob) -> String {
+        let title = job.meetingTitle.count > 28
+            ? String(job.meetingTitle.prefix(27)) + "…"
+            : job.meetingTitle
+        return title + " · " + jobRowStatus(job)
+    }
+
+    /// The shortest true description of where this job is.
+    ///
+    /// An error or warning wins over the state word, because "Error" alone sends
+    /// the user hunting. Both are truncated: the untruncated warning text is
+    /// what stretched the menu.
+    private func jobRowStatus(_ job: PipelineJob) -> String {
+        let detail: String? = if job.state == .error {
+            job.error
+        } else if !job.warnings.isEmpty {
+            job.warnings.first
+        } else if [.transcribing, .diarizing, .generatingProtocol].contains(job.state) {
+            stageProgressText(job)
+        } else {
+            nil
         }
-        .font(.caption2)
+        guard let detail, !detail.isEmpty else { return job.state.label }
+        return detail.count > 44 ? String(detail.prefix(43)) + "…" : detail
+    }
+
+    private func jobRowIcon(_ job: PipelineJob) -> String {
+        switch job.state {
+        case .done: "checkmark.circle"
+        case .error: "exclamationmark.triangle"
+        case .speakerNamingPending: "person.2"
+        default: "clock"
+        }
+    }
+
+    /// Whether this job's row does anything when clicked. Drives `.disabled`, so
+    /// a row that cannot act says so instead of swallowing the click.
+    private func jobHasAction(_ job: PipelineJob) -> Bool {
+        switch job.state {
+        case .done, .error, .speakerNamingPending: true
+        default: false
+        }
+    }
+
+    /// The single action a job's state affords: open the finished output, name
+    /// its speakers, or clear a failure. A running job is not cancellable from
+    /// here any more — a "Cancel" that sat next to "Dismiss" on a flattened row
+    /// was one mis-click away from discarding a recording mid-transcription.
+    private func jobAction(_ job: PipelineJob) {
+        switch job.state {
+        case .done:
+            if let path = job.protocolPath ?? job.transcriptPath { onOpenProtocol(path) }
+
+        case .speakerNamingPending:
+            onNameSpeakers?()
+
+        case .error:
+            onDismissJob(job.id)
+
+        default:
+            break
+        }
     }
 
     /// Live elapsed for the active stage, plus the historical average ("· Ø
@@ -309,17 +340,5 @@ struct MenuBarView: View {
 
     private func formattedElapsed(_ seconds: TimeInterval) -> String {
         formattedTime(seconds)
-    }
-
-    private func jobColor(_ job: PipelineJob) -> Color {
-        switch job.state {
-        case .waiting: .gray
-        case .transcribing: .blue
-        case .diarizing: .purple
-        case .generatingProtocol: .orange
-        case .speakerNamingPending: .purple
-        case .done: job.warnings.isEmpty ? .green : .yellow
-        case .error: .red
-        }
     }
 }

@@ -318,7 +318,7 @@ final class ChannelHealthController {
 
         default:
             "Both capture channels have been silent since the recording started. "
-                + "Check the audio routing — the meeting app may have claimed the mic "
+                + "Check the audio routing. The meeting app may have claimed the mic "
                 + "in exclusive mode (e.g. AirPods HFP), or the system input device may be muted."
         }
     }
