@@ -235,6 +235,20 @@ final class AppSettings {
     /// nothing in the field, which is exactly the failure a default of on would
     /// hide. Turn it on, measure `echo.suppressedSegments` on a recording made
     /// over loudspeakers, and the default can follow the evidence.
+    /// Whether to open the Name Speakers dialog after a recording.
+    ///
+    /// Off. The dialog interrupted every single recording, and the answer is
+    /// almost always "not now" — names are easier to fix later, in bulk,
+    /// against the finished `.md`. With this off the pipeline resolves naming
+    /// itself down the **skip** path, which accepts the automatic labels and
+    /// deliberately learns nothing: the confirm path folds each embedding into
+    /// a running-mean centroid in `speakers.json` with no history, so
+    /// auto-confirming placeholder names would merge every unrelated voice from
+    /// every meeting into one permanent identity.
+    var askForSpeakerNames: Bool {
+        didSet { defaults.set(askForSpeakerNames, forKey: "askForSpeakerNames") }
+    }
+
     var echoDedupEnabled: Bool {
         didSet { defaults.set(echoDedupEnabled, forKey: "echoDedupEnabled") }
     }
@@ -420,6 +434,7 @@ final class AppSettings {
         vadEnabled = defaults.object(forKey: "vadEnabled") as? Bool ?? false
         vadThreshold = defaults.object(forKey: "vadThreshold") as? Float ?? 0.5
         echoDedupEnabled = defaults.object(forKey: "echoDedupEnabled") as? Bool ?? false
+        askForSpeakerNames = defaults.object(forKey: "askForSpeakerNames") as? Bool ?? false
         diarizerMode = (defaults.string(forKey: "diarizerMode")
             .flatMap(DiarizerMode.init(rawValue:))) ?? .offline
         numSpeakers = defaults.object(forKey: "numSpeakers") as? Int ?? 0

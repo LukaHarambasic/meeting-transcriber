@@ -54,6 +54,15 @@ class PipelineQueue {
     /// may therefore relocate. Injectable so a test can exercise the hand-off
     /// without writing into the real user directory; see `AudioPersistencePolicy`.
     let stagingDir: URL
+    /// Whether to open the Name Speakers dialog when a job finishes diarizing.
+    ///
+    /// `false` (the default) resolves naming through the **skip** path instead:
+    /// the automatic labels are accepted and nothing is written to
+    /// `speakers.json`. Routing an automatic resolution through the *confirm*
+    /// path would reach `SpeakerMatcher.updateDB`, which folds the embedding
+    /// into a running-mean centroid with no history, so every unrelated voice
+    /// would accumulate under one permanent identity.
+    let askForSpeakerNames: Bool
     let diarizeEnabled: Bool
     /// Leave loudspeaker copies out of the transcript (`AppSettings.echoDedupEnabled`).
     let echoDedupEnabled: Bool
@@ -220,6 +229,10 @@ class PipelineQueue {
         self.logDir = logDir ?? AppPaths.ipcDir
         self.processedLedger = ProcessedRecordingsLedger(logDir: self.logDir)
         eventLog = PipelineEventLog(logDir: self.logDir)
+        // The skeleton init never runs a pipeline, so the value is inert; false
+        // matches production's default and keeps the dialog out of any test that
+        // does reach the naming gate.
+        askForSpeakerNames = false
         self.engine = nil
         self.diarizationFactory = nil
         self.diarizationFactoryWithMode = nil
@@ -301,6 +314,7 @@ class PipelineQueue {
         outputDir: URL,
         logDir: URL? = nil,
         stagingDir: URL = AppPaths.recordingsDir,
+        askForSpeakerNames: Bool = false,
         diarizeEnabled: Bool = false,
         echoDedupEnabled: Bool = true,
         numSpeakers: Int = 0,
@@ -323,6 +337,7 @@ class PipelineQueue {
         self.protocolGeneratorFactory = protocolGeneratorFactory
         self.outputDir = outputDir
         self.stagingDir = stagingDir
+        self.askForSpeakerNames = askForSpeakerNames
         self.diarizeEnabled = diarizeEnabled
         self.echoDedupEnabled = echoDedupEnabled
         self.numSpeakers = numSpeakers

@@ -677,7 +677,7 @@ extension PipelineQueue {
         }
 
         stopElapsedTimer()
-        if let namingData = naming.speakerNamingDataByJob[ctx.jobID] {
+        if let namingData = naming.speakerNamingDataByJob[ctx.jobID], askForSpeakerNames {
             updateJobState(id: ctx.jobID, to: .speakerNamingPending)
             // Auto-pop the dialog now that the job is in the right state.
             // The window's onAppear guard reads pendingSpeakerNamingJobs,
@@ -692,6 +692,21 @@ extension PipelineQueue {
             // divergent in-line state machine. The session captures `self`
             // (the session) strongly for the op duration, never the delegate.
             naming.invokeHandler(jobID: ctx.jobID, data: namingData)
+        } else if naming.speakerNamingDataByJob[ctx.jobID] != nil {
+            // Naming data exists but the user does not want to be asked, so
+            // resolve it here rather than leaving the job parked in
+            // `.speakerNamingPending` with nothing to advance it — that state
+            // is what the dialog used to clear, and a job stuck in it never
+            // gets a protocol.
+            //
+            // Deliberately the SKIP result, never `.confirmed`. Skip accepts
+            // the automatic labels and writes nothing to `speakers.json`;
+            // `.confirmed` reaches `SpeakerMatcher.updateDB`, which folds the
+            // embedding into a running-mean centroid with no history, so
+            // auto-confirming placeholder names would merge every unrelated
+            // voice from every meeting into one permanent identity.
+            updateJobState(id: ctx.jobID, to: .speakerNamingPending)
+            naming.completeSpeakerNaming(jobID: ctx.jobID, result: .skipped, source: .dialog)
         } else {
             updateJobState(id: ctx.jobID, to: .done)
         }

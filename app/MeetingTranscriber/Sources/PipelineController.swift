@@ -107,6 +107,7 @@ final class PipelineController {
             diarizationFactoryWithMode: { [self] mode in makeFluidDiarizer(mode: mode) },
             protocolGeneratorFactory: { [self] in makeProtocolGenerator() },
             outputDir: settings.effectiveOutputDir,
+            askForSpeakerNames: settings.askForSpeakerNames,
             diarizeEnabled: settings.diarize,
             echoDedupEnabled: settings.echoDedupEnabled,
             numSpeakers: settings.numSpeakers,

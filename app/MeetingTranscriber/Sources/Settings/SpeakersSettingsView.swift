@@ -100,6 +100,14 @@ struct SpeakersSettingsView: View {
         Section("Diarization") {
             Toggle("Speaker Diarization", isOn: $settings.diarize)
             if settings.diarize {
+                Toggle("Ask for speaker names after each recording", isOn: $settings.askForSpeakerNames)
+                Label(
+                    "Off: automatic labels are kept and nothing is added to your known voices. "
+                        + "Rename speakers later by editing the protocol's speakers list.",
+                    systemImage: "info.circle",
+                )
+                .foregroundStyle(.secondary)
+                .font(.caption)
                 diarizationModePicker
                 if settings.diarizerMode == .sortformer {
                     Label(
