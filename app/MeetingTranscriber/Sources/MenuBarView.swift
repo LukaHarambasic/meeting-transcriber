@@ -136,12 +136,18 @@ struct MenuBarView: View {
             .keyboardShortcut("n")
         }
 
+        // "Process Audio/Video Files..." read as "process the recordings you
+        // already made", which is not what it does and made the app look like
+        // it needed to be told to finish its own work. Recordings go onto the
+        // pipeline the moment they stop; this item is for audio that came from
+        // somewhere else.
         Button {
             onProcessFiles()
         } label: {
-            Label("Process Audio/Video Files...", systemImage: "doc.badge.plus")
+            Label("Transcribe Audio or Video...", systemImage: "doc.badge.plus")
         }
         .keyboardShortcut("p")
+        .help("Transcribe an existing file from disk, e.g. a recording someone sent you")
     }
 
     @ViewBuilder private var processingQueue: some View {

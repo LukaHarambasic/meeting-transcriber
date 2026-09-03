@@ -704,6 +704,20 @@ extension PipelineQueue {
     /// Used by: main pipeline (if no naming pending) and the session's
     /// reapplySpeakerNames / skipped / stale paths. Internal (not private)
     /// because it is a `SpeakerNamingSessionDelegate` witness.
+    /// Engine identity for the protocol frontmatter, or nil when unknown.
+    ///
+    /// Derived from the concrete type rather than added as a `TranscribingEngine`
+    /// requirement: that protocol is witnessed by test doubles, and a
+    /// requirement read only here would be unreferenced through the existential
+    /// — the exact shape `unused_declaration` already caught once on
+    /// `RecordingSleepBlocking.isHeld`.
+    private var engineFrontmatterName: String? {
+        guard let engine else { return nil }
+        if engine is WhisperKitEngine { return "whisperkit" }
+        if engine is ParakeetEngine { return "parakeet" }
+        return nil
+    }
+
     func generateProtocol(
         jobID: UUID, transcript: String, title: String, protocolsDir: URL,
     ) async {
@@ -731,7 +745,22 @@ extension PipelineQueue {
                 diarized: diarized,
                 meetingStartTime: meetingStartTime,
             )
-            let fullMD = protocolMD + "\n\n---\n\n## Full Transcript\n\n" + transcript
+            // Frontmatter first: the `.md` is the artifact anything downstream
+            // reads, and without it every consumer has to parse prose back out
+            // of the body to learn when the meeting was or who was in it.
+            let frontmatter = ProtocolFrontmatter(
+                title: title,
+                startedAt: meetingStartTime,
+                durationSeconds: nil,
+                participants: job?.participants ?? [],
+                speakers: ProtocolFrontmatter.speakers(inTranscript: transcript),
+                appName: job?.appName,
+                engine: engineFrontmatterName,
+                language: nil,
+                audioPath: nil,
+            ).render()
+            let fullMD = frontmatter + protocolMD
+                + "\n\n---\n\n## Full Transcript\n\n" + transcript
             let mdPath = try ProtocolGenerator.saveProtocol(
                 fullMD, basename: basename, dir: protocolsDir,
             )
