@@ -54,14 +54,24 @@ final class FakeNotificationScheduler: NotificationScheduling, @unchecked Sendab
         self.categories = categories
     }
 
+    /// The lock is taken in a *synchronous* helper deliberately. `NSLock.lock()`
+    /// and `unlock()` are `noasync`, so taking the lock directly inside
+    /// `alertDeliverability()` (which the protocol requires to be `async`) is a
+    /// hard compile error, not a warning: "instance method 'lock' is unavailable
+    /// from asynchronous contexts". Calling a sync method that locks is the
+    /// sanctioned shape. Every other member here locks from a sync context
+    /// already, which is why this is the only one that needs the indirection.
+    private func recordDeliverabilityCall() -> AskDeliverability {
+        lock.lock()
+        defer { lock.unlock() }
+        _alertDeliverabilityCallCount += 1
+        return _alertDeliverabilityStub
+    }
+
     // `async` without an `await`: the signature is fixed by the protocol
     // requirement, which the real adapter satisfies with a continuation.
     // swiftlint:disable:next async_without_await
     func alertDeliverability() async -> AskDeliverability {
-        lock.lock()
-        _alertDeliverabilityCallCount += 1
-        let stub = _alertDeliverabilityStub
-        lock.unlock()
-        return stub
+        recordDeliverabilityCall()
     }
 }
