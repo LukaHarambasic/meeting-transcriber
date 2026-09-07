@@ -119,6 +119,21 @@ DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/usr/lib swiftlint lint -
 # runs (it did: four commits, after .move was renamed to .delete). After ANY rename,
 # `git grep '<oldName>' -- '*/Tests/*'` before pushing, and fix the stale comments
 # alongside the assertions.
+#
+# Analyzer rules need that build log, so while the build is broken they do not run AT ALL and
+# their findings pile up invisibly. Expect a backlog when you first get the build green again
+# (six unused_declaration hits had accumulated over nine red commits), and expect it one class
+# per round, since each fix lets the compiler reach further.
+#
+# `trailing_closure` has a quirk worth knowing before you delete a closure argument: it does NOT
+# fire when the argument immediately before the final closure is itself a closure literal. So
+# removing such an argument can expose N pre-existing violations at every call site at once
+# (removing MenuBarView.onDismissJob exposed eleven). Suppress per-site with
+# `// swiftlint:disable:this trailing_closure`, which is the form the rule's own message asks
+# for: a file-level `// swiftlint:disable trailing_closure` is itself a violation
+# (blanket_disable_command), and a site that still has a closure literal in that position must
+# NOT carry a suppression or superfluous_disable_command fails the build. Read
+# `swiftlint rules <name>` for the triggering examples rather than guessing at the shape.
 
 # Pre-push parity check (release build — catches Sendable diagnostics
 # that debug-mode tolerates; flags App Store variant when --with-appstore)
