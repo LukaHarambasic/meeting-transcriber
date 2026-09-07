@@ -51,10 +51,17 @@ Single-source: Audio/Video → 16kHz mono (AVAudioFile → AVAsset → ffmpeg fa
 ./scripts/run_app.sh
 ```
 
-**Neither build script installs anywhere.** `run_app.sh` builds and launches
-`app/MeetingTranscriber/.build/MeetingTranscriber-Dev.app` **in place**; `build_release.sh` builds
-`MeetingTranscriber.app` into the build dir and wraps it in a DMG. Copying to `/Applications` or
-`~/Applications` is a manual step, so a machine can end up with two dev bundles at different paths
+**`run_app.sh` never installs; `build_release.sh` installs by DEFAULT.** (Corrected: this used to
+say neither installs anywhere.) `run_app.sh` builds and launches
+`app/MeetingTranscriber/.build/MeetingTranscriber-Dev.app` **in place**. `build_release.sh` builds
+`MeetingTranscriber.app`, wraps it in a DMG, **and copies it to `/Applications` unless you pass
+`--no-install`** (see its own `--install | --no-install` flags). Pass `--no-install` when you want
+to inspect the bundle before it replaces a running app; installing by hand afterwards, use `ditto`
+rather than `cp -R`, which does not preserve the signature, then confirm with
+`codesign --verify --deep --strict`. Note also that the version string does not change between
+builds of the same VERSION, so it cannot tell you whether a new binary shipped: grep the deployed
+binary's `strings` for a marker unique to the change. A machine can still end up with several
+bundles at different paths
 — and **TCC keys grants to path + signature, so a Screen Recording grant given to one does not
 apply to the other**. Symptom: recording silently refuses again after a rebuild or after switching
 which copy you launch. Check which is running before diagnosing a permission problem:
