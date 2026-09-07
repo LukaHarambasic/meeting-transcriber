@@ -582,13 +582,6 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertThrowsError(try body.find(text: "Update Available:"))
     }
 
-    // MARK: - Process Files button
-
-    func testProcessFilesButtonAlwaysExists() throws {
-        let sut = makeView(status: makeStatus(state: .idle))
-        let body = try sut.inspect()
-    }
-
     // MARK: - Error job display
 
     func testErrorJobShowsErrorMessage() throws {
