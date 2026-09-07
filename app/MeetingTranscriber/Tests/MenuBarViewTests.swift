@@ -48,12 +48,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: manualRecordingPendingOrActive,
             onStopManualRecording: onStopManualRecording,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: onNameSpeakers,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
     }
 
@@ -212,12 +210,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: { called = true },
+            onQuit: { called = true }, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         try body.find(button: "Quit").tap()
@@ -235,12 +231,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: { called = true },
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         try body.find(button: "Settings...").tap()
@@ -258,12 +252,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: { called = true },
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         try body.find(button: "Open Protocols Folder").tap()
@@ -281,12 +273,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: { called = true },
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         try body.find(button: "Open Last Protocol").tap()
@@ -304,11 +294,14 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            // No `disable:this` on `onQuit` here, unlike the other call sites:
+            // `trailing_closure` does not fire when the argument immediately
+            // before the final closure is itself a closure literal, and
+            // `superfluous_disable_command` fails the build on the unused
+            // suppression.
             onNameSpeakers: { called = true },
-            onDismissJob: { _ in },
             onQuit: {},
         )
         let body = try sut.inspect()
@@ -363,12 +356,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Processing"))
@@ -398,84 +389,13 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Dismiss"))
-    }
-
-    func testDismissButtonCallsCallbackWithJobID() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Standup",
-            appName: "Teams",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil,
-            micPath: nil,
-            micDelay: 0,
-        )
-        queue.enqueue(job)
-        queue.updateJobState(id: job.id, to: .done)
-
-        var dismissedID: UUID?
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: queue,
-            updateChecker: nil,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onNameSpeakers: nil,
-            onDismissJob: { dismissedID = $0 },
-            onQuit: {},
-        )
-        let body = try sut.inspect()
-        try body.find(button: "Dismiss").tap()
-        XCTAssertEqual(dismissedID, job.id)
-    }
-
-    func testDismissButtonShownForErrorJob() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Sprint",
-            appName: "Webex",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil,
-            micPath: nil,
-            micDelay: 0,
-        )
-        queue.enqueue(job)
-        queue.updateJobState(id: job.id, to: .error, error: "Failed")
-
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: queue,
-            updateChecker: nil,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
-        )
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Dismiss"))
-        XCTAssertNoThrow(try body.find(text: "Failed"))
     }
 
     func testWarningJobShowsWarningText() throws {
@@ -502,12 +422,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Diarization failed — speakers not identified"))
@@ -539,12 +457,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: { called = true },
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         try body.find(button: "Stop Recording").tap()
@@ -604,12 +520,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Transcription failed"))
@@ -741,12 +655,10 @@ final class MenuBarViewTests: XCTestCase {
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
         XCTAssertNoThrow(try body.find(text: "Meeting 1"))

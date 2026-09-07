@@ -17,11 +17,9 @@ struct MenuBarView: View {
     let manualRecordingPendingOrActive: Bool
     let onStopManualRecording: (() -> Void)?
     let onOpenLastProtocol: () -> Void
-    let onOpenProtocol: (URL) -> Void
     let onOpenProtocolsFolder: () -> Void
     let onOpenSettings: () -> Void
     let onNameSpeakers: (() -> Void)?
-    let onDismissJob: (UUID) -> Void
     let onQuit: () -> Void
 
     private var state: TranscriberState {
@@ -238,21 +236,6 @@ struct MenuBarView: View {
     }
 
     // MARK: - Helpers
-
-    /// Live elapsed for the active stage, plus the historical average ("· Ø
-    /// m:ss") when one exists, and a "longer than usual" hint once the live run
-    /// runs meaningfully past that average — so the user can tell at a glance
-    /// whether the current run is normal. Purely informational.
-    private func stageProgressText(_ job: PipelineJob) -> String {
-        let elapsed = pipelineQueue.activeJobElapsed
-        let base = "\(job.state.label) \(formattedElapsed(elapsed))"
-        guard let stage = StageKind(jobState: job.state),
-              let avg = pipelineQueue.averageSeconds(forJobID: job.id, stage: stage), avg > 0 else { return base }
-        let suffix = StageTimingStats.isSlowerThanUsual(elapsed: elapsed, average: avg)
-            ? " · longer than usual (Ø \(formattedElapsed(avg)))"
-            : " · Ø \(formattedElapsed(avg))"
-        return base + suffix
-    }
 
     private func formattedElapsed(_ seconds: TimeInterval) -> String {
         formattedTime(seconds)

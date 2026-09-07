@@ -109,7 +109,6 @@ struct MeetingTranscriberApp: App {
                     appState.watching.stopManualRecording()
                 } : nil,
                 onOpenLastProtocol: openLastProtocol,
-                onOpenProtocol: { url in NSWorkspace.shared.open(url) },
                 onOpenProtocolsFolder: openProtocolsFolder,
                 onOpenSettings: {
                     bringWindowToFront(id: "settings")
@@ -117,7 +116,6 @@ struct MeetingTranscriberApp: App {
                 onNameSpeakers: appState.hasPendingSpeakerNamingJobs ? {
                     bringWindowToFront(id: "speaker-naming")
                 } : nil,
-                onDismissJob: { id in appState.pipelineQueue.removeJob(id: id) },
                 onQuit: quit,
             )
         } label: { // swiftlint:disable:this closure_body_length

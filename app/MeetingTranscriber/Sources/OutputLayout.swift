@@ -35,26 +35,13 @@ enum OutputLayout {
         outputDir.appendingPathComponent(".audio", isDirectory: true)
     }
 
-    /// The pre-`.audio` location, kept only so an existing install's sidecars
-    /// stay reachable.
-    ///
-    /// Read-only and never written to. Without it, every recording made before
-    /// this layout change would lose late re-diarization silently — the sidecar
-    /// lookup would simply miss and the feature would report nothing wrong.
-    static func legacyWorkDir(in outputDir: URL) -> URL {
-        outputDir.appendingPathComponent("recordings", isDirectory: true)
-    }
-
-    /// The pre-`.audio` transcript location. Same reason: an "Open" on an older
-    /// job must still find its file.
-    static func legacyTranscriptsDir(in outputDir: URL) -> URL {
-        outputDir.appendingPathComponent("protocols", isDirectory: true)
-    }
-
-    /// First of `candidates` that exists, for reading a file that may predate
-    /// the layout change. Returns the preferred location when none exists, so a
-    /// caller creating the file writes it in the new place.
-    static func existing(_ candidates: [URL]) -> URL? {
-        candidates.first { FileManager.default.fileExists(atPath: $0.path) } ?? candidates.first
-    }
+    // The pre-`.audio` read-fallback helpers (`legacyWorkDir`,
+    // `legacyTranscriptsDir`, `existing`) were removed here. Their doc comments
+    // claimed they kept an older install's sidecars and transcripts reachable,
+    // but nothing ever called them, so that compatibility was described and
+    // never wired up: a job made before the layout change was already
+    // unreadable. They were invisible for nine commits because the analyze job
+    // needs a successful build log to run `unused_declaration`, and the build
+    // was broken for all of them. Reinstating the behaviour means wiring the
+    // read paths, not restoring these; the code is in git history.
 }
