@@ -40,6 +40,10 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
         settings: AppSettings? = nil,
         updateChecker: UpdateChecker? = nil,
     ) -> SettingsView {
+        // `pipelineQueue` and `onDismissJob` have no defaults on the view, so
+        // they are supplied here rather than added as helper parameters: no
+        // test in this file asserts on the Diagnostics tab's problem list, and
+        // an unused parameter is the shape that broke this target before.
         SettingsView(
             settings: settings ?? makeSettings(),
             whisperKitEngine: WhisperKitEngine(),
@@ -47,6 +51,11 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
             updateChecker: updateChecker,
             recognitionStatsLog: RecognitionStatsLog(),
             stageTimingLog: StageTimingLog(),
+            pipelineQueue: PipelineQueue(),
+            // Not trailing-closure: it would detach the closure from the label
+            // naming it, in a call that is entirely labelled dependencies.
+            // swiftlint:disable:next trailing_closure
+            onDismissJob: { _ in },
         )
     }
 
