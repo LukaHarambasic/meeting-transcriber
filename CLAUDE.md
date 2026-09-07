@@ -109,6 +109,16 @@ DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/usr/lib swiftlint lint -
 # Two shapes that look used and are not:
 #   - a protocol requirement only ever read through a CONCRETE type (test doubles), and
 #   - test-only API for a test you did not end up writing.
+#
+# The same job is where a RENAME lands, and that is the likelier break. `swift build`
+# only compiles Sources, and on a Mac without Xcode the test target cannot compile at
+# all, so renaming a type, case or member leaves the tests referring to the old name
+# with nothing local to catch it. It then surfaces as `xcodebuild` exit 65 in `analyze`,
+# which cancels both `test` jobs, so the RUN reports "cancelled" and no job reports
+# "failure" — main can sit broken for several commits while the suite silently never
+# runs (it did: four commits, after .move was renamed to .delete). After ANY rename,
+# `git grep '<oldName>' -- '*/Tests/*'` before pushing, and fix the stale comments
+# alongside the assertions.
 
 # Pre-push parity check (release build — catches Sendable diagnostics
 # that debug-mode tolerates; flags App Store variant when --with-appstore)
