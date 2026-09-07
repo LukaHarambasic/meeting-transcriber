@@ -28,10 +28,16 @@ final class WorkflowIntegrationTests: XCTestCase {
         var transitions: [(JobState, JobState)] = []
     }
 
+    /// `askForSpeakerNames` defaults to false, matching `PipelineQueue`'s own
+    /// default. A test that drives the naming dialog must opt in: with it off,
+    /// the pipeline takes the auto-skip branch and never calls
+    /// `speakerNamingHandler`, so a test waiting for the handler to advance the
+    /// job waits forever instead of failing.
     private func makeHarness(
         diarizeEnabled: Bool = false,
         stagingDir: URL? = nil,
         echoDedupEnabled: Bool = true,
+        askForSpeakerNames: Bool = false,
     ) throws -> (Harness, TransitionCollector) {
         let engine = MockEngine()
         engine.segmentsToReturn = [
@@ -60,6 +66,7 @@ final class WorkflowIntegrationTests: XCTestCase {
             outputDir: tmpDir,
             logDir: tmpDir,
             stagingDir: stagingDir ?? AppPaths.recordingsDir,
+            askForSpeakerNames: askForSpeakerNames,
             diarizeEnabled: diarizeEnabled,
             echoDedupEnabled: echoDedupEnabled,
             micLabel: "Me",
@@ -155,7 +162,13 @@ final class WorkflowIntegrationTests: XCTestCase {
     // MARK: - Happy Path: Single-Source, Diarization + Speaker Naming
 
     func testWorkflowWithDiarizationAndNaming() async throws {
-        let (h, collector) = try makeHarness(diarizeEnabled: true)
+        // `askForSpeakerNames: true` is load-bearing, not decoration: this test
+        // asserts the dialog path (`.speakerNamingPending` followed by the
+        // handler's `.confirmed` names). Since `65da915` made "don't ask" the
+        // default, omitting it sent the job down the auto-skip branch, the
+        // handler was never invoked, and `awaitJobTerminalState` hung until CI's
+        // 18-minute timeout rather than failing with a readable diff.
+        let (h, collector) = try makeHarness(diarizeEnabled: true, askForSpeakerNames: true)
 
         h.queue.speakerNamingHandler = { data in
             // Verify naming data is populated
