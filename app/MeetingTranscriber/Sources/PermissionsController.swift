@@ -19,9 +19,13 @@ final class PermissionsController {
     /// permission-problem overlay and the `currentBadge` `.error` state.
     private(set) var health: HealthCheckResult?
 
-    /// Timestamp of the last completed `check()` run. Used to debounce repeated
-    /// calls triggered by `NSApplication.didBecomeActiveNotification` so the
-    /// 500 ms mic probe doesn't churn the audio HAL on every Cmd-Tab.
+    /// Timestamp of the last completed `check()` run. Debounces the repeated
+    /// calls that `NSApplication.didBecomeActiveNotification` produces.
+    ///
+    /// It no longer protects the audio HAL: this controller's probe does not
+    /// open the microphone at all (see `init`). Kept because the screen-recording
+    /// check and the notification dedup are still worth not re-running on every
+    /// Cmd-Tab.
     private(set) var lastCheckAt: Date?
 
     private let notifier: any AppNotifying
@@ -29,7 +33,16 @@ final class PermissionsController {
 
     init(
         notifier: any AppNotifying,
-        probe: @escaping () async -> HealthCheckResult = { await PermissionHealthCheck.runLive() },
+        // `.trustSystemVerdict`, not the default `.probe`: this controller runs at
+        // launch and on every app activation, and opening the microphone there
+        // drags a Bluetooth headset out of A2DP into HFP, corrupting the user's
+        // playback until they reconnect it. A headset is usually the default
+        // input as well as the default output, so "just checking the mic" breaks
+        // the audio they are listening to. The debounce below predates this and
+        // only reduced how often it happened.
+        probe: @escaping () async -> HealthCheckResult = {
+            await PermissionHealthCheck.runLive(micProbe: .trustSystemVerdict)
+        },
     ) {
         self.notifier = notifier
         self.probe = probe
