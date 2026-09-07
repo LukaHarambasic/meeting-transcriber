@@ -72,7 +72,17 @@ private struct WindowAccessor: NSViewRepresentable {
 
 @main
 struct MeetingTranscriberApp: App {
-    @State private var appState = AppState(notifier: NotificationManager.shared)
+    // `askDeliverability` is wired here rather than derived from the notifier:
+    // this is the only place that knows the notifier IS a `NotificationManager`,
+    // and `WatchingController` deliberately defaults it away from production so
+    // no test can reach `UNUserNotificationCenter.current()` by omission.
+    // Not trailing-closure: it would detach the closure from the argument label
+    // that says what it is, in a call whose other argument is also a dependency.
+    @State private var appState = AppState(
+        notifier: NotificationManager.shared,
+        // swiftlint:disable:next trailing_closure
+        askDeliverability: { await NotificationManager.shared.alertDeliverability() },
+    )
     @State private var captionsWindow: LiveCaptionsWindowController?
     @Environment(\.openWindow)
     private var openWindow

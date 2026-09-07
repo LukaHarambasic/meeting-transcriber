@@ -96,6 +96,17 @@ class WatchLoop {
     /// recovery function works (which `DualSourceRecorder`'s own tests cover).
     let salvageInterrupted: () -> Int
 
+    /// Asks the system whether a notification alert can currently be shown.
+    ///
+    /// Injected, not reached through `notifier`: that protocol's own doc comment
+    /// explains why it resists new requirements, and a closure lets a test drive
+    /// the suppressed case without a notification centre. Defaults to
+    /// `.unknown`, which `AskDeliverability.canBeAnswered` treats as not
+    /// answerable, so forgetting to wire it yields the cautious behaviour.
+    /// `@MainActor` like `recorderFactory`: the production closure captures a
+    /// non-`Sendable` existential, which is otherwise a data-race error.
+    let askDeliverability: @MainActor () async -> AskDeliverability
+
     /// When this recording was last known to be wanted: its start, or the
     /// user's last confirmation. `private(set)` for the RPC snapshot and tests.
     private(set) var confirmedAt: Date = .distantPast
@@ -104,6 +115,22 @@ class WatchLoop {
     /// is. Non-nil suspends the interval entirely — see
     /// `RecordingConfirmationPolicy`.
     private(set) var confirmationPromptedAt: Date?
+
+    /// When either capture channel was last above the speech threshold, or nil
+    /// if no speech has been measured during this recording. Reset per
+    /// recording in `startManualRecording`.
+    ///
+    /// Sampled on this class's own poll rather than borrowed from
+    /// `ChannelHealthController`, whose polling is gated on the "silent capture
+    /// indicator" setting: the stop decision must not lose its evidence because
+    /// a cosmetic indicator was switched off.
+    private(set) var lastSpeechAt: Date?
+
+    /// True once an ask on this recording expired without the system being able
+    /// to deliver it, which disables the automatic stop for the rest of the
+    /// recording. Read by `AppState` to put a row in the menu, because the menu
+    /// is the only channel that is reachable when notifications are not.
+    private(set) var askUnanswerable: Bool = false
 
     /// Hook called when state changes (for UI updates, notifications, etc.)
     var onStateChange: ((State, State) -> Void)?
@@ -131,6 +158,7 @@ class WatchLoop {
         salvageInterrupted: @escaping () -> Int = {
             DualSourceRecorder.recoverCrashedRecordings(minAge: 0)
         },
+        askDeliverability: @MainActor @escaping () async -> AskDeliverability = { .unknown },
     ) {
         self.recorderFactory = recorderFactory
         self.pipelineQueue = pipelineQueue
@@ -148,6 +176,7 @@ class WatchLoop {
         self.sleepBlocker = sleepBlocker
         self.confirmationPolicy = confirmationPolicy
         self.salvageInterrupted = salvageInterrupted
+        self.askDeliverability = askDeliverability
     }
 
     nonisolated static var defaultOutputDir: URL {
@@ -241,6 +270,12 @@ class WatchLoop {
         sleepBlocker?.hold(reason: "Meeting Transcriber is recording")
         confirmedAt = nowProvider()
         confirmationPromptedAt = nil
+        // Both are per-recording. Carrying `lastSpeechAt` over would let the
+        // previous meeting's speech vouch for this one's first minutes, and
+        // carrying `askUnanswerable` over would leave the menu claiming this
+        // recording will not stop on its own before any ask has been tried.
+        lastSpeechAt = nil
+        askUnanswerable = false
 
         let pid = source.appPID
         activeRecorder = recorder
@@ -354,6 +389,24 @@ class WatchLoop {
         logger.info("Recording confirmed by the user — next check in \(self.confirmationPolicy.interval, privacy: .public)s")
     }
 
+    /// Reads the live capture levels and folds them into `lastSpeechAt`,
+    /// returning what the confirmation policy should treat as attendance.
+    ///
+    /// `.unmonitored` when there is no recorder to read, which the policy
+    /// refuses to stop on. That is the honest answer: an absent recorder means
+    /// no evidence, not evidence of an empty room. Either channel counts, so a
+    /// meeting held on loudspeakers with the mic muted still reads as attended.
+    func sampleAttendance(now: Date) -> RecordingAttendance {
+        guard let recorder = activeRecorder else { return .unmonitored }
+        let threshold = SilentRecordingMonitor.defaultSpeechThresholdDBFS
+        let loudest = max(recorder.micLevelDBFS, recorder.appLevelDBFS)
+        if loudest >= threshold {
+            lastSpeechAt = now
+        }
+        guard let lastSpeechAt else { return .noSpeechObserved }
+        return .lastSpeech(lastSpeechAt)
+    }
+
     /// One confirmation step, run from the manual-recording monitor's poll.
     /// Returns false when the recording was stopped, so the monitor can exit
     /// rather than poll a loop that is now idle.
@@ -361,11 +414,40 @@ class WatchLoop {
     /// Lives here rather than in the monitor's extension because it mutates
     /// `confirmationPromptedAt`, which is `private(set)` and so unreachable from
     /// another file.
-    func stepConfirmation(now: Date) -> Bool {
+    func stepConfirmation(
+        now: Date,
+        attendance: RecordingAttendance,
+        deliverability: AskDeliverability,
+    ) -> Bool {
         switch confirmationPolicy.step(
-            now: now, confirmedAt: confirmedAt, promptedAt: confirmationPromptedAt,
+            now: now,
+            confirmedAt: confirmedAt,
+            promptedAt: confirmationPromptedAt,
+            attendance: attendance,
+            deliverability: deliverability,
         ) {
         case .wait:
+            return true
+
+        case .attended:
+            // Speech is a confirmation. Resets the interval and clears any
+            // outstanding ask, so a prompt posted during a lull cannot have its
+            // grace period expire while the meeting is still going.
+            confirmedAt = now
+            confirmationPromptedAt = nil
+            return true
+
+        case .keepUnanswerable:
+            // The ask could not be delivered, so its silence says nothing about
+            // the user. Keep recording; `maxDuration` remains the backstop. The
+            // flag latches for the rest of the recording rather than tracking
+            // the live setting: the auto-stop stays off for this recording even
+            // if notifications are fixed halfway through, because the ask that
+            // already expired is not re-delivered.
+            if !askUnanswerable {
+                logger.warning("Still-recording ask could not be delivered — keeping the recording")
+            }
+            askUnanswerable = true
             return true
 
         case .prompt:

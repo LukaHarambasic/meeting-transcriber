@@ -46,6 +46,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, App
         super.init()
     }
 
+    /// Whether the system will actually show an alert for this app right now.
+    /// Forwards to the scheduler so callers never reach it directly (the
+    /// production one talks to `UNUserNotificationCenter`, tests inject a
+    /// fake).
+    func alertDeliverability() async -> AskDeliverability {
+        await scheduler.alertDeliverability()
+    }
+
     /// Set up delegate and request permission. Must be called after the app bundle is loaded.
     func setUp() {
         guard !isSetUp else { return }

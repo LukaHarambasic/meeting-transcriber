@@ -121,4 +121,47 @@ final class NotificationManagerSchedulingTests: XCTestCase {
         let content = NotificationManager.makeNotificationContent(title: "T", body: "B")
         XCTAssertEqual(content.categoryIdentifier, "")
     }
+
+    // MARK: - alertDeliverability
+
+    /// `NotificationManager.alertDeliverability()` must forward to the
+    /// scheduler rather than answer on its own — this is the "helper tested,
+    /// caller never" shape this repo has been bitten by before, so it is
+    /// pinned by both a stub value and a call count, not just one.
+    func testAlertDeliverabilityForwardsToScheduler() async {
+        let (manager, fake) = makeManager()
+        fake.alertDeliverabilityStub = .suppressed
+        let result = await manager.alertDeliverability()
+        XCTAssertEqual(result, .suppressed)
+        XCTAssertEqual(fake.alertDeliverabilityCallCount, 1)
+    }
+
+    func testAlertDeliverabilityForwardsDeliverableToo() async {
+        let (manager, fake) = makeManager()
+        fake.alertDeliverabilityStub = .deliverable
+        let result = await manager.alertDeliverability()
+        XCTAssertEqual(result, .deliverable)
+    }
+
+    /// A conformer that never implements `alertDeliverability()` at all (the
+    /// shape of every test double written before this requirement existed)
+    /// must still compile and must answer `.unknown` via the protocol's
+    /// default, not `.deliverable` — exercised through the existential
+    /// (`any NotificationScheduling`), because a protocol requirement read
+    /// only through a concrete type reads as unused to the `analyze` job.
+    func testProtocolDefaultAnswersUnknownThroughExistential() async {
+        let scheduler: any NotificationScheduling = MinimalScheduler()
+        let result = await scheduler.alertDeliverability()
+        XCTAssertEqual(result, .unknown)
+    }
+}
+
+/// Conforms to `NotificationScheduling` implementing only the requirements
+/// that predate `alertDeliverability()`, so its use above proves the default
+/// extension is reachable for a conformer that never overrides it.
+private final class MinimalScheduler: NotificationScheduling, @unchecked Sendable {
+    func add(_: UNNotificationRequest) {}
+    func setDelegate(_: (any UNUserNotificationCenterDelegate)?) {}
+    func requestAuthorization() {}
+    func setCategories(_: Set<UNNotificationCategory>) {}
 }

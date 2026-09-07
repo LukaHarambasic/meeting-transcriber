@@ -21,6 +21,7 @@ struct RecordingIssue: Equatable {
     enum Remedy: Equatable {
         case openScreenRecording
         case openMicrophone
+        case openNotifications
 
         /// Pane to open, or nil if the URL literal failed to parse (see
         /// `SystemSettingsPaths`). A nil drops the button and keeps the text.
@@ -28,6 +29,7 @@ struct RecordingIssue: Equatable {
             switch self {
             case .openScreenRecording: SystemSettingsPaths.screenRecordingURL
             case .openMicrophone: SystemSettingsPaths.microphoneURL
+            case .openNotifications: SystemSettingsPaths.notificationsURL
             }
         }
 
@@ -35,6 +37,7 @@ struct RecordingIssue: Equatable {
             switch self {
             case .openScreenRecording: "Open Screen Recording Settings"
             case .openMicrophone: "Open Microphone Settings"
+            case .openNotifications: "Open Notifications Settings"
             }
         }
     }
@@ -58,8 +61,17 @@ extension RecordingIssue {
     /// severity. A missing grant comes first because it refuses the recording
     /// outright and is the only entry here the user can fix in ten seconds. A
     /// recording error comes next: it names a recording that already failed. A
-    /// dead capture channel comes last — that recording is running, and is
-    /// producing at least one usable track.
+    /// dead capture channel comes next after that — that recording is running,
+    /// and is producing at least one usable track.
+    ///
+    /// `askUnanswerable` comes last, and deliberately after every other case
+    /// including the silent channels, because it blocks nothing: the recording
+    /// this ask belongs to is running (or already finished) and complete, and
+    /// what is degraded is only the unattended-recording safeguard that would
+    /// otherwise have stopped it unasked. A silent capture channel, by
+    /// contrast, is costing real audio right now, on the very recording the
+    /// menu is describing — that is strictly more urgent than a safeguard that
+    /// stayed off, and must win the one line the menu has room for.
     ///
     /// - Parameters:
     ///   - permissionProblems: `HealthCheckResult.problems`, in its own order.
@@ -67,11 +79,16 @@ extension RecordingIssue {
     ///     recording starts, so this only ever names the most recent failure.
     ///   - micSilent: the mic channel is silent while the other carries audio.
     ///   - appSilent: the app-audio channel is silent while the mic carries it.
+    ///   - askUnanswerable: a "Still recording?" ask was posted during this
+    ///     recording and the system could not show it (notifications
+    ///     suppressed), so the automatic stop that ask would otherwise have
+    ///     armed stayed off for this recording.
     static func compose(
         permissionProblems: [PermissionProblem],
         recordingError: String?,
         micSilent: Bool,
         appSilent: Bool,
+        askUnanswerable: Bool,
     ) -> RecordingIssue? {
         if let problem = permissionProblems.first {
             return RecordingIssue(
@@ -90,6 +107,16 @@ extension RecordingIssue {
         }
         if appSilent {
             return RecordingIssue(headline: "App audio is silent", remedy: .openScreenRecording)
+        }
+        if askUnanswerable {
+            return RecordingIssue(
+                // Names the cause as well as the consequence, because the
+                // remedy button opens the Notifications pane and a headline
+                // that mentioned only the consequence left that button
+                // unexplained.
+                headline: "Notifications are off, so this recording won't stop on its own.",
+                remedy: .openNotifications,
+            )
         }
         return nil
     }

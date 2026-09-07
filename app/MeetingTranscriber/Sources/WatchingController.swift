@@ -81,6 +81,19 @@ final class WatchingController {
     /// the production implementation writes into the real staging directory.
     private let recoverInterrupted: () -> Int
 
+    /// Asks the system whether a notification alert can currently be shown, for
+    /// the still-recording check's stop decision.
+    ///
+    /// Injected, and defaulted **away** from production (`.unknown`) for the
+    /// same reason `salvageInterrupted` / `recoverInterrupted` are: the real
+    /// implementation touches `UNUserNotificationCenter.current()`, which needs
+    /// a real app bundle and traps under `swift test`. A test that omits this
+    /// gets `.unknown`, which `AskDeliverability.canBeAnswered` treats as not
+    /// answerable, so the cautious path is also the one reached by omission.
+    /// The production closure is supplied by the composition root, which is the
+    /// only place that knows about `NotificationManager`.
+    private let askDeliverability: @Sendable () async -> AskDeliverability
+
     init(
         settings: AppSettings,
         notifier: any AppNotifying,
@@ -99,6 +112,7 @@ final class WatchingController {
         recoverInterrupted: @escaping () -> Int = {
             DualSourceRecorder.recoverCrashedRecordings(minAge: 0)
         },
+        askDeliverability: @escaping @Sendable () async -> AskDeliverability = { .unknown },
     ) {
         self.settings = settings
         self.notifier = notifier
@@ -106,6 +120,7 @@ final class WatchingController {
         self.channelHealth = channelHealth
         self.permissions = permissions
         self.liveTranscription = liveTranscription
+        self.askDeliverability = askDeliverability
         self.ensureMicAccess = ensureMicAccess
         self.requestScreenRecording = requestScreenRecording
         self.startJoinTimeout = startJoinTimeout
@@ -244,6 +259,7 @@ final class WatchingController {
             notifier: notifier,
             sleepBlocker: makeSleepBlocker(),
             confirmationPolicy: confirmationPolicy,
+            askDeliverability: askDeliverability,
         )
         watchLoop = loop
 

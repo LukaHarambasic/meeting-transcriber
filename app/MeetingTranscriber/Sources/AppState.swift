@@ -171,6 +171,9 @@ final class AppState {
         settings: AppSettings = AppState.makeDefaultSettings(),
         notifier: any AppNotifying = SilentNotifier(),
         updateChecker: UpdateChecker? = nil,
+        // Passed straight through to `WatchingController`; see its stored
+        // property for why the default points away from production.
+        askDeliverability: @escaping @Sendable () async -> AskDeliverability = { .unknown },
     ) {
         // Dependency defaults are resolved through explicitly-typed factory
         // helpers (above) rather than inline `?? SomeType()` expressions (and an
@@ -211,6 +214,7 @@ final class AppState {
             channelHealth: channelHealth,
             permissions: permissions,
             liveTranscription: liveTranscription,
+            askDeliverability: askDeliverability,
         )
 
         #if !APPSTORE
@@ -504,6 +508,7 @@ final class AppState {
             recordingError: watching.watchLoop?.lastError,
             micSilent: micSilentOverlay,
             appSilent: appSilentOverlay,
+            askUnanswerable: watching.watchLoop?.askUnanswerable ?? false,
         )
     }
 

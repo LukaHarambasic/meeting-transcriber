@@ -39,7 +39,19 @@ extension WatchLoop {
             // After the hard stop conditions, not before: a recording whose
             // target already exited should end for that reason, with that log
             // line, rather than being attributed to an unanswered check.
-            guard stepConfirmation(now: nowProvider()) else { return }
+            let now = nowProvider()
+            // Sampled every poll, because the point is to catch speech whenever
+            // it happens, not only when an ask is due.
+            let attendance = sampleAttendance(now: now)
+            // Queried only while an ask is outstanding: that is the sole branch
+            // of the policy that reads it, and this loop runs every few seconds
+            // for the length of a meeting.
+            let deliverability: AskDeliverability = if confirmationPromptedAt == nil {
+                .unknown
+            } else {
+                await askDeliverability()
+            }
+            guard stepConfirmation(now: now, attendance: attendance, deliverability: deliverability) else { return }
             try? await sleepProvider(pollInterval)
         }
     }

@@ -20,6 +20,28 @@ protocol NotificationScheduling: AnyObject, Sendable {
     /// downgrade that leaves the user no way to answer, and the unanswered ask
     /// then stops their recording.
     func setCategories(_ categories: Set<UNNotificationCategory>)
+
+    /// Whether the system will actually show an alert for this app right now.
+    ///
+    /// Has a default (below) rather than being satisfied at every conformer,
+    /// so a test double that predates this requirement keeps compiling. The
+    /// default answers `.unknown`, not `.deliverable`: `AskDeliverability`
+    /// treats `.unknown` as not answerable, so a conformer that forgets this
+    /// requirement makes the still-recording check cautious (it falls back to
+    /// asking and, absent an answer, stopping), never destructive (it never
+    /// reads a silently-suppressed ask as a real answer). Same reasoning as
+    /// `AppNotifying.notify`'s urgency parameter in `AppState.swift`: default
+    /// toward the safer failure, not the convenient one.
+    func alertDeliverability() async -> AskDeliverability
+}
+
+extension NotificationScheduling {
+    // `async` without an `await`: the signature is fixed by the requirement
+    // above, which the real adapter satisfies with a continuation.
+    // swiftlint:disable:next async_without_await
+    func alertDeliverability() async -> AskDeliverability {
+        .unknown
+    }
 }
 
 /// Real adapter: forwards to `UNUserNotificationCenter.current()`. Sendable (its
@@ -63,6 +85,41 @@ final class SystemNotificationScheduler: NotificationScheduling, Sendable {
             }
             if !granted {
                 self.logger.warning("Notification permission denied")
+            }
+        }
+    }
+
+    /// `getNotificationSettings` is completion-handler based and
+    /// `UNNotificationSettings` is not `Sendable`, so the two fields this reads
+    /// are pulled out *inside* the completion, mirroring why `add(_:)` above
+    /// lifts `request.identifier` out before crossing the same boundary — the
+    /// continuation is resumed with the resulting `AskDeliverability`, never
+    /// with the settings object itself.
+    func alertDeliverability() async -> AskDeliverability {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let authorizationStatus = settings.authorizationStatus
+                let alertSetting = settings.alertSetting
+                let result: AskDeliverability = switch (authorizationStatus, alertSetting) {
+                case (.authorized, .enabled), (.provisional, .enabled):
+                    .deliverable
+
+                case (.authorized, .disabled), (.provisional, .disabled):
+                    .suppressed
+
+                case (.denied, _), (.notDetermined, _), (.ephemeral, _):
+                    .suppressed
+
+                // Matched positively on `.enabled` rather than treating
+                // "not disabled" as deliverable: `.notSupported` and any future
+                // case would otherwise fall into `.deliverable`, which is the
+                // one direction that can end a recording. `.unknown` is read as
+                // not answerable downstream, so an unrecognised setting keeps
+                // the recording instead.
+                default:
+                    .unknown
+                }
+                continuation.resume(returning: result)
             }
         }
     }

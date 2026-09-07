@@ -67,4 +67,30 @@ public enum SystemSettingsPaths {
     static func settingsURL(anchor: String) -> URL? {
         URL(string: "x-apple.systempreferences:\(privacyPaneID)?\(anchor)")
     }
+
+    /// Human-readable label for the Notifications pane, paired with
+    /// ``notificationsURL`` the same way `screenRecording` pairs with
+    /// `screenRecordingURL`. Unlike Screen Recording, this pane's name has not
+    /// changed across the OS versions this app supports, so unlike
+    /// `screenRecording` there is no version branch here.
+    public static let notifications = "System Settings → Notifications"
+
+    /// Bundle identifier of the Notifications pane in System Settings, a
+    /// separate pane from Privacy & Security and so not part of
+    /// `privacyPaneID` above. Verified the same way and for the same reason:
+    /// a stale identifier still parses into a well-formed URL, so the button
+    /// would render and clicking it would silently do nothing. Checked on
+    /// macOS 26: `/System/Library/ExtensionKit/Extensions/NotificationsSettings.appex`
+    /// reports exactly this identifier.
+    private static let notificationsPaneID = "com.apple.Notifications-Settings.extension"
+
+    /// Deep link that opens the Notifications pane directly. See
+    /// ``screenRecordingURL`` for why this is a URL rather than a bare
+    /// string. No anchor: this opens the top-level per-app notification list
+    /// rather than jumping into Meeting Transcriber's own row, because this
+    /// library is app-identity-agnostic (see the other two accessors, which
+    /// likewise carry no bundle identifier).
+    public static var notificationsURL: URL? {
+        URL(string: "x-apple.systempreferences:\(notificationsPaneID)")
+    }
 }

@@ -6,11 +6,28 @@ enum RecordingConfirmationDecision: Equatable {
     /// Nothing due. Either the interval has not elapsed, or a prompt is
     /// outstanding and still inside its grace period.
     case wait
+    /// Speech was heard recently enough to prove the recording is wanted.
+    /// The caller resets `confirmedAt` and clears any outstanding prompt, so
+    /// a meeting people are talking in is never asked and never stopped.
+    ///
+    /// Distinct from `.wait` because it mutates the caller's clock. Returning
+    /// `.wait` here would leave a prompt posted mid-meeting standing, and its
+    /// grace period would then expire while everyone was still speaking.
+    case attended
     /// Ask the user whether the recording should continue.
     case prompt
-    /// The outstanding prompt went unanswered for the whole grace period —
-    /// stop the recording (and save it).
+    /// The outstanding prompt went unanswered for the whole grace period, the
+    /// ask was deliverable, and the levels do not contradict it — stop the
+    /// recording (and save it).
     case stopUnconfirmed
+    /// The grace period expired on an ask the system could not deliver. Keep
+    /// recording and surface it where the user will actually see it (the menu),
+    /// because the silence proves nothing about the user.
+    ///
+    /// A recording that outlives its ask this way is bounded by
+    /// `WatchLoop.maxDuration`, so this defers the runaway guard rather than
+    /// removing it.
+    case keepUnanswerable
 }
 
 /// Decides when to ask "are you still recording?" and when an unanswered ask
@@ -48,12 +65,28 @@ struct RecordingConfirmationPolicy: Equatable {
     /// costs the rest of the meeting, never what was already captured.
     static let defaultGrace: TimeInterval = 5 * 60
 
+    /// How recent measured speech has to be to count as proof the recording is
+    /// still attended. Deliberately its own knob rather than reusing `grace`
+    /// or `interval`: this is about how quickly the room can go quiet after
+    /// the last word (a meeting winding down), not about how long an ask may
+    /// go unanswered or how often to ask in the first place.
+    ///
+    /// Five minutes, the same value as `defaultGrace` today, but the two are
+    /// not the same question and are allowed to diverge later.
+    static let defaultAttentionWindow: TimeInterval = 5 * 60
+
     let interval: TimeInterval
     let grace: TimeInterval
+    let attentionWindow: TimeInterval
 
-    init(interval: TimeInterval = Self.defaultInterval, grace: TimeInterval = Self.defaultGrace) {
+    init(
+        interval: TimeInterval = Self.defaultInterval,
+        grace: TimeInterval = Self.defaultGrace,
+        attentionWindow: TimeInterval = Self.defaultAttentionWindow,
+    ) {
         self.interval = interval
         self.grace = grace
+        self.attentionWindow = attentionWindow
     }
 
     /// - Parameters:
@@ -61,9 +94,69 @@ struct RecordingConfirmationPolicy: Equatable {
     ///   - confirmedAt: when the recording was last known to be wanted — the
     ///     start time, or the last confirmation.
     ///   - promptedAt: when the outstanding ask was posted, or nil if none is.
-    func step(now: Date, confirmedAt: Date, promptedAt: Date?) -> RecordingConfirmationDecision {
+    ///   - attendance: measured audio evidence for the current recording, independent
+    ///     of whether anyone has answered a prompt.
+    ///   - deliverability: whether the OS actually surfaced (or would surface) the ask,
+    ///     independent of whether measured audio says anyone is there.
+    ///
+    /// Rule order is load-bearing, not incidental:
+    ///
+    /// 1. Recent speech wins over everything else, including an outstanding,
+    ///    already-expired prompt. A prompt is posted from a single instant's
+    ///    silence; if the room goes quiet for a beat around minute 30 the ask
+    ///    still fires, and without this rule taking priority, five minutes of
+    ///    grace could run out while the meeting was audibly still going,
+    ///    stopping a live 55-minute meeting at 35. Checking attendance first
+    ///    means speech at any point before the grace deadline reopens the
+    ///    question instead of the countdown finishing regardless.
+    /// 2. Otherwise, an outstanding prompt is judged on its own: still inside
+    ///    grace waits; past grace with no corroborating attendance and a
+    ///    deliverable ask stops the recording; past grace with either no
+    ///    level data at all or an ask that could not reach the user keeps
+    ///    recording instead, because unanswered silence is not evidence of
+    ///    anything when the ask was never truly asked.
+    /// 3. With nothing outstanding, the interval alone decides whether it is
+    ///    time to ask.
+    func step(
+        now: Date,
+        confirmedAt: Date,
+        promptedAt: Date?,
+        attendance: RecordingAttendance,
+        deliverability: AskDeliverability,
+    ) -> RecordingConfirmationDecision {
+        // A `.lastSpeech` older than `attentionWindow` is deliberately treated
+        // the same as `.noSpeechObserved` below, not as a weaker positive
+        // signal: this is exactly the "meeting ended and the room went
+        // quiet" case the whole feature exists to catch, so stale speech
+        // must not keep protecting a recording indefinitely.
+        if case let .lastSpeech(heardAt) = attendance, now.timeIntervalSince(heardAt) < attentionWindow {
+            return .attended
+        }
         if let promptedAt {
-            return now.timeIntervalSince(promptedAt) >= grace ? .stopUnconfirmed : .wait
+            if now.timeIntervalSince(promptedAt) < grace {
+                return .wait
+            }
+            // `.unmonitored` (no recorder, no level data at all) can never
+            // stop a recording: without levels the app has neither an answer
+            // nor evidence either way, and treating silence-of-evidence as
+            // silence-of-attendance would be exactly the false stop this
+            // rewrite exists to remove. `WatchLoop.maxDuration` (four hours)
+            // remains the backstop for a recording that runs unattended this
+            // way.
+            if attendance == .unmonitored {
+                return .keepUnanswerable
+            }
+            // An ask that could not be delivered (muted at the OS level, or
+            // `.timeSensitive` unavailable without a provisioning profile) is
+            // not evidence the user was asked and declined to answer — it is
+            // evidence the user was never asked. `.unknown` counts as not
+            // answerable for the same reason: an ask whose delivery cannot be
+            // confirmed must not be allowed to end a recording on the strength
+            // of a silence that might just be undelivered mail.
+            if !deliverability.canBeAnswered {
+                return .keepUnanswerable
+            }
+            return .stopUnconfirmed
         }
         return now.timeIntervalSince(confirmedAt) >= interval ? .prompt : .wait
     }

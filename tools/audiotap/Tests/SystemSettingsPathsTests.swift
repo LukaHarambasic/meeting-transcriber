@@ -65,4 +65,28 @@ final class SystemSettingsPathsTests: XCTestCase {
         XCTAssertTrue(mic.absoluteString.hasSuffix("?Privacy_Microphone"))
         XCTAssertNotEqual(screen, mic)
     }
+
+    // MARK: - Notifications pane
+
+    /// Pins the identifier verified against the running OS
+    /// (`/System/Library/ExtensionKit/Extensions/NotificationsSettings.appex`
+    /// reports `com.apple.Notifications-Settings.extension`), the same way
+    /// `testDeepLinksUseTheModernPaneIdentifier` pins the Privacy & Security
+    /// one above — a well-formed URL naming a pane that does not exist still
+    /// parses, so the button would render and do nothing.
+    func testNotificationsURLUsesTheVerifiedPaneIdentifier() throws {
+        let resolved = try XCTUnwrap(
+            SystemSettingsPaths.notificationsURL,
+            "a nil URL silently drops the remedy button",
+        )
+        XCTAssertEqual(resolved.scheme, "x-apple.systempreferences")
+        XCTAssertEqual(
+            resolved.absoluteString,
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+        )
+    }
+
+    func testNotificationsLabelNamesThePane() {
+        XCTAssertEqual(SystemSettingsPaths.notifications, "System Settings → Notifications")
+    }
 }

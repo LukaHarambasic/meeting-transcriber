@@ -7,6 +7,7 @@ final class RecordingIssueTests: XCTestCase {
     func testNoInputsMeansNoIssue() {
         XCTAssertNil(RecordingIssue.compose(
             permissionProblems: [], recordingError: nil, micSilent: false, appSilent: false,
+            askUnanswerable: false,
         ))
     }
 
@@ -16,6 +17,7 @@ final class RecordingIssueTests: XCTestCase {
     func testEmptyRecordingErrorMeansNoIssue() {
         XCTAssertNil(RecordingIssue.compose(
             permissionProblems: [], recordingError: "", micSilent: false, appSilent: false,
+            askUnanswerable: false,
         ))
     }
 
@@ -26,7 +28,7 @@ final class RecordingIssueTests: XCTestCase {
     func testDeniedScreenRecordingBecomesAnIssueWithItsPane() {
         let issue = RecordingIssue.compose(
             permissionProblems: [.screenRecordingDenied],
-            recordingError: nil, micSilent: false, appSilent: false,
+            recordingError: nil, micSilent: false, appSilent: false, askUnanswerable: false,
         )
         XCTAssertEqual(issue?.headline, PermissionProblem.screenRecordingDenied.description)
         XCTAssertEqual(issue?.remedy, .openScreenRecording)
@@ -35,7 +37,7 @@ final class RecordingIssueTests: XCTestCase {
     func testDeniedMicrophoneBecomesAnIssueWithItsPane() {
         let issue = RecordingIssue.compose(
             permissionProblems: [.microphoneDenied],
-            recordingError: nil, micSilent: false, appSilent: false,
+            recordingError: nil, micSilent: false, appSilent: false, askUnanswerable: false,
         )
         XCTAssertEqual(issue?.headline, PermissionProblem.microphoneDenied.description)
         XCTAssertEqual(issue?.remedy, .openMicrophone)
@@ -47,7 +49,7 @@ final class RecordingIssueTests: XCTestCase {
     func testBrokenGrantKeepsItsOwnRemedyWording() {
         let issue = RecordingIssue.compose(
             permissionProblems: [.screenRecordingBroken],
-            recordingError: nil, micSilent: false, appSilent: false,
+            recordingError: nil, micSilent: false, appSilent: false, askUnanswerable: false,
         )
         XCTAssertEqual(issue?.headline, PermissionProblem.screenRecordingBroken.description)
         XCTAssertTrue(issue?.headline.contains("toggle it off and on") ?? false)
@@ -60,7 +62,7 @@ final class RecordingIssueTests: XCTestCase {
     func testPermissionProblemOutranksARecordingError() {
         let issue = RecordingIssue.compose(
             permissionProblems: [.screenRecordingDenied],
-            recordingError: "Disk full", micSilent: false, appSilent: false,
+            recordingError: "Disk full", micSilent: false, appSilent: false, askUnanswerable: false,
         )
         XCTAssertEqual(issue?.remedy, .openScreenRecording)
         XCTAssertNotEqual(issue?.headline, "Disk full", "the grant outranks the failed recording")
@@ -71,7 +73,7 @@ final class RecordingIssueTests: XCTestCase {
     func testRecordingErrorOutranksASilentChannel() {
         let issue = RecordingIssue.compose(
             permissionProblems: [],
-            recordingError: "Disk full", micSilent: true, appSilent: true,
+            recordingError: "Disk full", micSilent: true, appSilent: true, askUnanswerable: false,
         )
         XCTAssertEqual(
             issue?.headline, "Disk full",
@@ -83,6 +85,31 @@ final class RecordingIssueTests: XCTestCase {
     func testMicSilenceOutranksAppSilence() {
         let issue = RecordingIssue.compose(
             permissionProblems: [], recordingError: nil, micSilent: true, appSilent: true,
+            askUnanswerable: false,
+        )
+        XCTAssertEqual(issue?.remedy, .openMicrophone)
+    }
+
+    /// The whole reason `askUnanswerable` sits last: it blocks nothing (the
+    /// recording is running and complete, only the unattended-stop safeguard
+    /// is degraded), while a silent channel is losing audio on the very
+    /// recording the menu describes right now. That silent channel must win
+    /// the one line the menu has room for.
+    func testAppSilenceOutranksAskUnanswerable() {
+        let issue = RecordingIssue.compose(
+            permissionProblems: [], recordingError: nil, micSilent: false, appSilent: true,
+            askUnanswerable: true,
+        )
+        XCTAssertEqual(
+            issue?.remedy, .openScreenRecording,
+            "a silent channel is losing audio right now and must outrank a degraded safeguard",
+        )
+    }
+
+    func testMicSilenceOutranksAskUnanswerable() {
+        let issue = RecordingIssue.compose(
+            permissionProblems: [], recordingError: nil, micSilent: true, appSilent: false,
+            askUnanswerable: true,
         )
         XCTAssertEqual(issue?.remedy, .openMicrophone)
     }
@@ -92,6 +119,7 @@ final class RecordingIssueTests: XCTestCase {
     func testAppSilenceAloneBecomesAnIssue() {
         let issue = RecordingIssue.compose(
             permissionProblems: [], recordingError: nil, micSilent: false, appSilent: true,
+            askUnanswerable: false,
         )
         XCTAssertEqual(issue?.headline, "App audio is silent")
         XCTAssertEqual(issue?.remedy, .openScreenRecording)
@@ -100,16 +128,38 @@ final class RecordingIssueTests: XCTestCase {
     func testMicSilenceAloneBecomesAnIssue() {
         let issue = RecordingIssue.compose(
             permissionProblems: [], recordingError: nil, micSilent: true, appSilent: false,
+            askUnanswerable: false,
         )
         XCTAssertEqual(issue?.headline, "Microphone is silent")
+    }
+
+    // MARK: - Ask unanswerable
+
+    /// The exact case this exists for: notifications for this app are
+    /// suppressed by the OS, a "Still recording?" ask went unseen, and without
+    /// this the menu said nothing about the safeguard being off.
+    func testAskUnanswerableAloneBecomesAnIssueWithNotificationsPane() {
+        let issue = RecordingIssue.compose(
+            permissionProblems: [], recordingError: nil, micSilent: false, appSilent: false,
+            askUnanswerable: true,
+        )
+        XCTAssertEqual(issue?.remedy, .openNotifications)
+        XCTAssertFalse(issue?.headline.isEmpty ?? true)
+    }
+
+    func testAskUnanswerableFalseMeansNoIssueWhenNothingElseIsWrong() {
+        XCTAssertNil(RecordingIssue.compose(
+            permissionProblems: [], recordingError: nil, micSilent: false, appSilent: false,
+            askUnanswerable: false,
+        ))
     }
 
     // MARK: - Remedies
 
     /// The button only renders when `settingsURL` resolves, so a broken literal
     /// would silently drop the one control that fixes the problem.
-    func testBothRemediesResolveASettingsURL() {
-        for remedy in [RecordingIssue.Remedy.openScreenRecording, .openMicrophone] {
+    func testAllRemediesResolveASettingsURL() {
+        for remedy in [RecordingIssue.Remedy.openScreenRecording, .openMicrophone, .openNotifications] {
             XCTAssertNotNil(remedy.settingsURL, "\(remedy) must resolve a System Settings URL")
             XCTAssertFalse(remedy.buttonTitle.isEmpty)
         }
@@ -119,6 +169,14 @@ final class RecordingIssueTests: XCTestCase {
         XCTAssertNotEqual(
             RecordingIssue.Remedy.openScreenRecording.settingsURL,
             RecordingIssue.Remedy.openMicrophone.settingsURL,
+        )
+        XCTAssertNotEqual(
+            RecordingIssue.Remedy.openScreenRecording.settingsURL,
+            RecordingIssue.Remedy.openNotifications.settingsURL,
+        )
+        XCTAssertNotEqual(
+            RecordingIssue.Remedy.openMicrophone.settingsURL,
+            RecordingIssue.Remedy.openNotifications.settingsURL,
         )
     }
 }

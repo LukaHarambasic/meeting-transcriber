@@ -29,6 +29,17 @@ enum SilentRecordingEvent: Equatable {
 /// either side proves the recording isn't dead and discards the
 /// in-flight episode.
 struct SilentRecordingMonitor {
+    /// dBFS at or above which a channel counts as carrying actual speech
+    /// rather than room tone.
+    ///
+    /// A static so the still-recording confirmation can classify attendance
+    /// against the *same* number this monitor uses (`WatchLoop` reads it to
+    /// build `RecordingAttendance`). Two independent copies of a threshold
+    /// that must agree is a drift waiting to happen: the two features would
+    /// disagree about whether the room is occupied, and the confirmation would
+    /// stop a recording this monitor considers alive.
+    static let defaultSpeechThresholdDBFS: Double = -50
+
     let silenceThresholdDBFS: Double
     let speechThresholdDBFS: Double
     let debounceSeconds: TimeInterval
@@ -42,7 +53,7 @@ struct SilentRecordingMonitor {
 
     init(
         silenceThresholdDBFS: Double = -60,
-        speechThresholdDBFS: Double = -50,
+        speechThresholdDBFS: Double = Self.defaultSpeechThresholdDBFS,
         debounceSeconds: TimeInterval = 90,
     ) {
         self.silenceThresholdDBFS = silenceThresholdDBFS
