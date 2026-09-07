@@ -68,6 +68,15 @@ the same path.
 ./scripts/run_app.sh
 
 # Swift tests (parallel — ~1.4× faster than sequential)
+# REQUIRES XCODE. On a Mac with only Command Line Tools this cannot run for ANY
+# package in this repo: it dies `no such module 'XCTest'` inside the vendored
+# SnapshotTesting dependency, before reaching a single test of ours. The message
+# names a dependency, so it reads as a broken checkout rather than a missing
+# toolchain — check `xcode-select -p` before believing it. There is no local
+# workaround; verify with `swift build` (+ `./scripts/pre-push.sh` for the
+# release-mode Sendable diagnostics) and let CI run the suite. Consequence worth
+# stating plainly: on such a machine the "never trust a test until it has failed"
+# rule cannot be satisfied locally, so a test's first real execution is in CI.
 cd app/MeetingTranscriber && swift test --parallel
 
 # Swift tests under sanitizers (slow — TSan ~7.5 min, ASan ~4.5 min on M-series)
@@ -382,6 +391,8 @@ the naming-confirm lane, or runner configuration.
 - `[debug] Mic RMS (5s): … dBFS, samples=…` every 5 s during mic capture
 
 View via Console.app, subsystem `com.meetingtranscriber.audiotap`. Off by default; turn on when investigating silent recordings or unusual routing.
+
+**Reading the app's own log:** `log show --predicate 'process == "MeetingTranscriber"'` is flooded by `FrontBoard:SceneClient … NSSceneFenceAction` lines at roughly 24/s, emitted by the menu-bar icon's waveform animation. Real events are unfindable without `| /usr/bin/grep -vE 'FrontBoard|SceneClient'`. To scope to the app's own logging instead, predicate on `subsystem CONTAINS "meetingtranscriber"`, which excludes the Apple-framework subsystems the process also logs under (`com.apple.coreaudio`, `com.apple.avfaudio`, `com.apple.UserNotifications`) — useful for pipeline events, but it will hide the CoreAudio and notification-delivery lines that explain a capture or notification failure.
 
 ## Build Variants
 
