@@ -37,6 +37,15 @@ for arg in "$@"; do
     esac
 done
 
+# Before the builds, because it is the only check here that covers the TEST
+# sources on a Mac that cannot compile them (see the script's own header). It is
+# a text scan, so it costs milliseconds.
+echo "==> test-source hygiene"
+./scripts/check-test-hygiene.py \
+    app/MeetingTranscriber/Tests \
+    tools/audiotap/Tests \
+    tools/mt-cli/Tests
+
 cd app/MeetingTranscriber
 
 echo "==> swift build -c release (Homebrew variant)"
