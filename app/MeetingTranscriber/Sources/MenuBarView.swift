@@ -234,10 +234,4 @@ struct MenuBarView: View {
         }
         .keyboardShortcut("q")
     }
-
-    // MARK: - Helpers
-
-    private func formattedElapsed(_ seconds: TimeInterval) -> String {
-        formattedTime(seconds)
-    }
 }

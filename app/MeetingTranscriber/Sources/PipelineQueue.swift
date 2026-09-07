@@ -101,13 +101,17 @@ class PipelineQueue {
     /// PipelineQueue+Stages.swift clears this flag across the file boundary.
     var isProcessing = false
 
-    /// Historical average wall-clock seconds per (stage, engine, diarizer-mode)
-    /// config (last 30 days), used by the menu to show "live vs. typical".
-    /// Keyed by full config so the menu compares a Sortformer run against
-    /// Sortformer history, not a blended offline/Sortformer average. Refreshed
-    /// from `stageTimingLog` at launch and after each stage; empty until the log
-    /// has data. Read via `averageSeconds(forJobID:stage:)`.
-    private(set) var stageAverageByConfig: [StageConfig: Double] = [:]
+    // The per-config stage-average cache (`stageAverageByConfig`,
+    // `averageSeconds`, `refreshStageAverages`, `reloadStageAverages`) lived
+    // here to feed a menu hint reading "live vs. typical". It was maintained
+    // faithfully (recomputed at launch and after every stage) but never READ:
+    // the only reader was `averageSeconds`, whose only caller was
+    // `MenuBarView.stageProgressText`, which had no call site of its own. So it
+    // cost a log read and an aggregation per stage to populate a dictionary
+    // nobody looked at. Removed rather than re-wired, since where such a hint
+    // belongs is a UI decision and the menu has deliberately been slimmed. The
+    // Processing Stats tab is unaffected: it calls
+    // `StageTimingStats.aggregateByConfig` directly off its own log read.
 
     /// When the current `.transcribing`/`.diarizing`/`.generatingProtocol` state
     /// was entered, per job — so `updateJobState` can record the state's duration
@@ -368,7 +372,6 @@ class PipelineQueue {
             recognitionStatsLog: recognitionStatsLog,
         )
         naming.delegate = self
-        refreshStageAverages()
     }
 
     var activeJobs: [PipelineJob] {
@@ -615,9 +618,8 @@ class PipelineQueue {
             engine: activeEngineTag,
             diarizerMode: usedDiarizerMode(forJobID: jobID)?.rawValue,
         )
-        Task { [weak self] in
+        Task {
             await stageTimingLog.append([event])
-            await self?.reloadStageAverages()
         }
     }
 
@@ -625,32 +627,6 @@ class PipelineQueue {
     /// logged events; also used to resolve the active config for the menu.
     private var activeEngineTag: String? {
         engine.map { String(describing: type(of: $0)) }
-    }
-
-    /// The historical average for the config a job is running at a given stage —
-    /// built the same way `logStageTiming` stamps events (engine + the job's
-    /// diarizer mode), so the menu compares like-with-like. nil until that exact
-    /// config has logged data.
-    func averageSeconds(forJobID jobID: UUID, stage: StageKind) -> Double? {
-        let config = StageConfig(
-            stage: stage, engine: activeEngineTag,
-            diarizerMode: usedDiarizerMode(forJobID: jobID)?.rawValue,
-        )
-        return stageAverageByConfig[config]
-    }
-
-    /// Reload recent timings and recompute the per-config average wall-clock.
-    private func refreshStageAverages() {
-        Task { [weak self] in await self?.reloadStageAverages() }
-    }
-
-    private func reloadStageAverages() async {
-        guard let stageTimingLog else { return }
-        let events = await stageTimingLog.loadRecent(within: 30 * 86400)
-        // Key by full config (stage + engine + diarizer-mode) so the menu
-        // resolves a like-with-like average per active job; see averageSeconds.
-        stageAverageByConfig = StageTimingStats.aggregateByConfig(events: events)
-            .mapValues(\.avgWallClockSeconds)
     }
 
     // MARK: - Processing
