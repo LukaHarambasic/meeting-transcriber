@@ -11,10 +11,10 @@ final class AudioPersistencePolicyTests: XCTestCase {
         )
     }
 
-    /// A recording the app made itself: staging is a working area, so moving it
-    /// into the output folder is the normal hand-off.
-    func testStagingRecordingMoves() {
-        XCTAssertEqual(action("/data/MeetingTranscriber/recordings/20260101_sync_mix.wav"), .move)
+    /// A recording the app made itself: staging is a working area, and once the
+    /// transcript exists the app's own audio is the app's to dispose of.
+    func testStagingRecordingIsDeleted() {
+        XCTAssertEqual(action("/data/MeetingTranscriber/recordings/20260101_sync_mix.wav"), .delete)
     }
 
     /// The case issue #551 is about: a voice memo the user picked from their own
@@ -42,10 +42,10 @@ final class AudioPersistencePolicyTests: XCTestCase {
 
     /// Path comparison must survive the non-normalized forms a caller can pass
     /// in, otherwise a staging file would be misread as a user file and the
-    /// hand-off into the output folder would silently stop happening.
+    /// staging directory would silently stop being cleaned up.
     func testNormalizesPathsBeforeComparing() {
-        XCTAssertEqual(action("/data/MeetingTranscriber/recordings/./take_mix.wav"), .move)
-        XCTAssertEqual(action("/data/MeetingTranscriber/other/../recordings/take_mix.wav"), .move)
+        XCTAssertEqual(action("/data/MeetingTranscriber/recordings/./take_mix.wav"), .delete)
+        XCTAssertEqual(action("/data/MeetingTranscriber/other/../recordings/take_mix.wav"), .delete)
     }
 
     /// Reaching the same directory through a symlink must not read as a
@@ -70,7 +70,7 @@ final class AudioPersistencePolicyTests: XCTestCase {
         )
         XCTAssertEqual(
             AudioPersistencePolicy.action(source: source, stagingDir: real, destinationDir: destination),
-            .move,
+            .delete,
             "a symlinked path into staging is still staging",
         )
     }

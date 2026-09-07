@@ -1176,7 +1176,7 @@ final class PipelineQueueTests: XCTestCase {
 
     /// Two runs that both reach the end now both try to relocate the same
     /// staging audio. The relocation deletes an existing destination before
-    /// moving onto it, and the policy that picks `.move` only looks at path
+    /// moving onto it, and the policy that picks `.delete` only looks at path
     /// shape, never at whether the source still exists. So the second finisher
     /// deletes the recording the first one persisted and then fails its move
     /// into a swallowed warning, leaving no copy anywhere: staging was emptied
