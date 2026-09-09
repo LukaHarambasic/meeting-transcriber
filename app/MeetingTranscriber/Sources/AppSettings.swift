@@ -397,16 +397,6 @@ final class AppSettings {
         }
     #endif
 
-    // MARK: - Updates
-
-    var checkForUpdates: Bool {
-        didSet { defaults.set(checkForUpdates, forKey: "checkForUpdates") }
-    }
-
-    var includePreReleases: Bool {
-        didSet { defaults.set(includePreReleases, forKey: "includePreReleases") }
-    }
-
     // MARK: - Init
 
     init(defaults: UserDefaults = .standard, apiKeyAccount: String = "openAIAPIKey") {
@@ -479,8 +469,6 @@ final class AppSettings {
         #if !APPSTORE
             debugRPCEnabled = defaults.object(forKey: "debugRPCEnabled") as? Bool ?? false
         #endif
-        checkForUpdates = defaults.object(forKey: "checkForUpdates") as? Bool ?? true
-        includePreReleases = defaults.object(forKey: "includePreReleases") as? Bool ?? false
     }
 
     /// Bag of values used during init to read all 5 tuning knobs in one go.

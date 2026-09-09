@@ -1,9 +1,8 @@
-import AppKit
+import Foundation
 import SwiftUI
 
 struct GeneralSettingsView: View {
     @Bindable var settings: AppSettings
-    var updateChecker: UpdateChecker?
 
     var body: some View {
         Form {
@@ -13,10 +12,6 @@ struct GeneralSettingsView: View {
                 if settings.recordOnly {
                     recordOnlyBanner
                 }
-            }
-
-            if let updateChecker {
-                updatesSection(updateChecker: updateChecker)
             }
         }
         .formStyle(.grouped)
@@ -46,61 +41,5 @@ struct GeneralSettingsView: View {
         .padding(8)
         .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
         .accessibilityIdentifier(A11yID.recordOnlyBanner)
-    }
-
-    private func updatesSection(updateChecker: UpdateChecker) -> some View {
-        // swiftlint:disable:next closure_body_length
-        Section("Updates") {
-            Toggle("Check for Updates", isOn: $settings.checkForUpdates)
-
-            if settings.checkForUpdates {
-                Toggle("Include Pre-Releases", isOn: $settings.includePreReleases)
-            }
-
-            HStack {
-                Button {
-                    updateChecker.checkNow(
-                        includePreReleases: settings.includePreReleases,
-                    )
-                } label: {
-                    HStack(spacing: 4) {
-                        if updateChecker.isChecking {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text("Check Now")
-                    }
-                }
-                .disabled(updateChecker.isChecking)
-
-                if let error = updateChecker.lastError {
-                    Label(error, systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                } else if let update = updateChecker.availableUpdate {
-                    Label(
-                        "Update available: \(update.tagName)",
-                        systemImage: "arrow.down.circle.fill",
-                    )
-                    .foregroundStyle(.blue)
-                    .font(.caption)
-                } else if updateChecker.lastCheckDate != nil {
-                    Label("Up to date", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                }
-            }
-
-            if let update = updateChecker.availableUpdate {
-                Button {
-                    NSWorkspace.shared.open(update.dmgURL ?? update.htmlURL)
-                } label: {
-                    Label(
-                        "Download \(update.tagName)",
-                        systemImage: "arrow.down.to.line",
-                    )
-                }
-            }
-        }
     }
 }

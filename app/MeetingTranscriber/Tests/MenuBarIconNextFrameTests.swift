@@ -3,7 +3,7 @@ import XCTest
 
 final class MenuBarIconNextFrameTests: XCTestCase {
     func testStaticBadgesDoNotAdvance() {
-        for badge in [BadgeKind.inactive, .userAction, .done, .error, .updateAvailable] {
+        for badge in [BadgeKind.inactive, .userAction, .done, .error] {
             XCTAssertEqual(
                 MenuBarIcon.nextFrame(0, badge: badge), 0,
                 "\(badge) is not animated; frame must not change",

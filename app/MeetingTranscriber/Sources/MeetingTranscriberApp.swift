@@ -102,7 +102,6 @@ struct MeetingTranscriberApp: App {
                 status: appState.currentStatus,
                 issue: appState.currentIssue,
                 pipelineQueue: appState.pipelineQueue,
-                updateChecker: appState.updateChecker,
                 onRecordMeeting: { appState.watching.startMeetingRecording() },
                 manualRecordingPendingOrActive: appState.watching.isManualRecording,
                 onStopManualRecording: appState.isManualRecording ? {
@@ -142,9 +141,6 @@ struct MeetingTranscriberApp: App {
             }
             .task {
                 await appState.engines.preloadActiveModel()
-            }
-            .task {
-                appState.updateChecker.startPeriodicChecks(settings: appState.settings)
             }
             .task {
                 await appState.permissions.check()
@@ -197,7 +193,6 @@ struct MeetingTranscriberApp: App {
                 settings: appState.settings,
                 whisperKitEngine: appState.engines.whisperKit,
                 parakeetEngine: appState.engines.parakeetEngine,
-                updateChecker: appState.updateChecker,
                 // Share the pipeline's actor instance so both writers serialise on
                 // the same `recognition_log.jsonl` file. Fallback only fires in the
                 // test-only PipelineQueue init that intentionally leaves it nil.

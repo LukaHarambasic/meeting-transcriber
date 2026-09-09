@@ -19,8 +19,6 @@ enum BadgeKind: String, CaseIterable, Codable {
     case userAction
     case done
     case error
-    // swiftlint:disable:next raw_value_for_camel_cased_codable_enum
-    case updateAvailable
 
     /// Whether this badge kind uses animation.
     var isAnimated: Bool {
@@ -253,10 +251,6 @@ enum MenuBarIcon {
         case .processing:
             drawProtocolAnimation(in: rect, frame: frame)
 
-        case .updateAvailable:
-            drawStaticBars(in: rect)
-            drawUpdateArrow(in: rect)
-
         case .inactive, .userAction, .done, .error:
             drawStaticBars(in: rect)
         }
@@ -390,29 +384,6 @@ enum MenuBarIcon {
         ).fill()
     }
 
-    // MARK: - Update Available (small upward arrow badge in bottom-right)
-
-    private static func drawUpdateArrow(in rect: NSRect) {
-        let size: CGFloat = 6.0
-        let margin: CGFloat = 0.5
-        let cx = rect.maxX - size / 2 - margin
-        let cy = rect.minY + size / 2 + margin
-
-        // Arrow pointing up: triangle + stem
-        let arrow = NSBezierPath()
-        // Triangle head
-        arrow.move(to: NSPoint(x: cx, y: cy + size / 2)) // top
-        arrow.line(to: NSPoint(x: cx - size / 3, y: cy + 0.5)) // bottom-left
-        arrow.line(to: NSPoint(x: cx + size / 3, y: cy + 0.5)) // bottom-right
-        arrow.close()
-        arrow.fill()
-
-        // Stem
-        let stemWidth: CGFloat = 1.4
-        let stem = NSRect(x: cx - stemWidth / 2, y: cy - size / 3, width: stemWidth, height: size / 2)
-        NSBezierPath(roundedRect: stem, xRadius: stemWidth / 2, yRadius: stemWidth / 2).fill()
-    }
-
     // MARK: - Protocol Generation Animation (text lines appearing sequentially)
 
     private static func drawProtocolAnimation(in rect: NSRect, frame: Int) {
@@ -445,7 +416,6 @@ extension BadgeKind {
         recordingActive: Bool,
         transcriberState: TranscriberState,
         activeJobState: JobState?,
-        updateAvailable: Bool,
         permissionProblem: Bool = false,
     ) -> BadgeKind {
         if recordingActive {
@@ -466,7 +436,6 @@ extension BadgeKind {
         case .none: break
         }
         if permissionProblem { return .error }
-        if updateAvailable { return .updateAvailable }
         return .inactive
     }
 }

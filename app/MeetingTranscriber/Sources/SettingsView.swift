@@ -4,7 +4,6 @@ struct SettingsView: View {
     @Bindable var settings: AppSettings
     var whisperKitEngine: WhisperKitEngine
     var parakeetEngine: ParakeetEngine
-    var updateChecker: UpdateChecker?
 
     /// Required: the same actor instance the pipeline writes to, so the Stats
     /// tab and the pipeline don't race two writers on `recognition_log.jsonl`.
@@ -57,10 +56,7 @@ struct SettingsView: View {
     private func detailView(for tab: SettingsTab) -> some View {
         switch tab {
         case .general:
-            GeneralSettingsView(
-                settings: settings,
-                updateChecker: updateChecker,
-            )
+            GeneralSettingsView(settings: settings)
 
         case .audio:
             AudioSettingsView(settings: settings)

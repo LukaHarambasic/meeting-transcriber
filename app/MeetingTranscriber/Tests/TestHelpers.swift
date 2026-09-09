@@ -509,7 +509,7 @@ actor MockEouManager: EouStreamingAsrManaging {
 extension XCTestCase {
     /// Build an `AppState` over a per-call unique, volatile `UserDefaults` suite
     /// that is torn down after the test. Shared by the RPC-snapshot test classes
-    /// (`RPCBadgeStateTests`, `RPCUpdateStatusTests`, `RPCManualRecordingStateTests`,
+    /// (`RPCBadgeStateTests`, `RPCManualRecordingStateTests`,
     /// …) to exercise `rpcStateSnapshot()` without touching the real defaults
     /// domain or leaking a preference domain across runs. Captures only the
     /// Sendable suite name in the teardown block.

@@ -24,7 +24,6 @@
                 protocolGeneration: rpcProtocolSettings(),
                 output: rpcOutputSettings(),
                 diagnostics: rpcDiagnosticsSettings(),
-                updates: rpcUpdatesSettings(),
             )
         }
 
@@ -111,13 +110,6 @@
             RPCStateSnapshot.Settings.Diagnostics(
                 verboseDiagnostics: verboseDiagnostics,
                 debugRPCEnabled: debugRPCEnabled,
-            )
-        }
-
-        private func rpcUpdatesSettings() -> RPCStateSnapshot.Settings.Updates {
-            RPCStateSnapshot.Settings.Updates(
-                checkForUpdates: checkForUpdates,
-                includePreReleases: includePreReleases,
             )
         }
     }

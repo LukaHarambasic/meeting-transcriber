@@ -33,7 +33,6 @@ final class MenuBarViewTests: XCTestCase {
         status: TranscriberStatus? = nil,
         issue: RecordingIssue? = nil,
         pipelineQueue: PipelineQueue? = nil,
-        updateChecker: UpdateChecker? = nil,
         onNameSpeakers: (() -> Void)? = nil,
         onStopManualRecording: (() -> Void)? = nil,
         onRecordMeeting: @escaping () -> Void = {},
@@ -43,7 +42,6 @@ final class MenuBarViewTests: XCTestCase {
             status: status,
             issue: issue,
             pipelineQueue: pipelineQueue ?? PipelineQueue(),
-            updateChecker: updateChecker,
             onRecordMeeting: onRecordMeeting,
             manualRecordingPendingOrActive: manualRecordingPendingOrActive,
             onStopManualRecording: onStopManualRecording,
@@ -205,7 +203,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(state: .idle),
             issue: nil,
             pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -226,7 +223,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(state: .idle),
             issue: nil,
             pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -247,7 +243,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(state: .idle),
             issue: nil,
             pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -268,7 +263,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(state: .protocolReady, protocolPath: "/tmp/p.md"),
             issue: nil,
             pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -289,7 +283,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(state: .waitingForSpeakerNames),
             issue: nil,
             pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -351,7 +344,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(),
             issue: nil,
             pipelineQueue: queue,
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -384,7 +376,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(),
             issue: nil,
             pipelineQueue: queue,
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -417,7 +408,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(),
             issue: nil,
             pipelineQueue: queue,
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -452,7 +442,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(state: .recording),
             issue: nil,
             pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: { called = true },
@@ -465,37 +454,6 @@ final class MenuBarViewTests: XCTestCase {
         let body = try sut.inspect()
         try body.find(button: "Stop Recording").tap()
         XCTAssertTrue(called)
-    }
-
-    // MARK: - Update indicator
-
-    func testUpdateIndicatorShownWhenUpdateAvailable() throws {
-        let checker = UpdateChecker(provider: MockUpdateProvider())
-        checker.availableUpdate = try ReleaseInfo(
-            tagName: "v1.0.0",
-            name: "Release v1.0.0",
-            prerelease: false,
-            htmlURL: XCTUnwrap(URL(string: "https://github.com/pasrom/meeting-transcriber/releases/tag/v1.0.0")),
-            dmgURL: URL(string: "https://example.com/app.dmg"),
-        )
-
-        let sut = makeView(status: makeStatus(), updateChecker: checker)
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Update Available: v1.0.0"))
-    }
-
-    func testUpdateIndicatorHiddenWhenNoUpdate() throws {
-        let checker = UpdateChecker(provider: MockUpdateProvider())
-
-        let sut = makeView(status: makeStatus(), updateChecker: checker)
-        let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(text: "Update Available:"))
-    }
-
-    func testUpdateIndicatorHiddenWhenNoChecker() throws {
-        let sut = makeView(status: makeStatus())
-        let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(text: "Update Available:"))
     }
 
     // MARK: - Error job display
@@ -515,7 +473,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(),
             issue: nil,
             pipelineQueue: queue,
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
@@ -650,7 +607,6 @@ final class MenuBarViewTests: XCTestCase {
             status: makeStatus(),
             issue: nil,
             pipelineQueue: queue,
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,

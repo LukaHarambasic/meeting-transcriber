@@ -9,7 +9,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .recording,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .recording)
     }
@@ -19,7 +18,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .transcribing,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .transcribing)
     }
@@ -29,7 +27,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .recordingDone,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .transcribing)
     }
@@ -39,7 +36,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .waitingForSpeakerCount,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .userAction)
     }
@@ -49,7 +45,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .waitingForSpeakerNames,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .userAction)
     }
@@ -59,7 +54,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .protocolReady,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .done)
     }
@@ -69,7 +63,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .error,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .error)
     }
@@ -79,7 +72,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .generatingProtocol,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .processing)
     }
@@ -91,7 +83,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .transcribing,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .transcribing)
     }
@@ -101,7 +92,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .diarizing,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .diarizing)
     }
@@ -111,7 +101,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .generatingProtocol,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .processing)
     }
@@ -121,29 +110,17 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: true,
             transcriberState: .recording,
             activeJobState: .transcribing,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .recording)
     }
 
     // MARK: No recording, no jobs
 
-    func testBadgeUpdateAvailableWhenNoRecordingNoJobs() {
-        let badge = BadgeKind.compute(
-            recordingActive: false,
-            transcriberState: .idle,
-            activeJobState: nil,
-            updateAvailable: true,
-        )
-        XCTAssertEqual(badge, .updateAvailable)
-    }
-
     func testBadgeInactiveWhenNothingActive() {
         let badge = BadgeKind.compute(
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(badge, .inactive)
     }
@@ -155,7 +132,6 @@ final class BadgeKindComputeTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
-            updateAvailable: false,
             permissionProblem: true,
         )
         XCTAssertEqual(badge, .error)

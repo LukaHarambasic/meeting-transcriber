@@ -53,13 +53,6 @@
         /// raw value (e.g. "recording"). Record-only mode is a separate
         /// persistent overlay; derive it from `settings.recording.recordOnly`.
         let badge: BadgeKind
-        /// Update-checker runtime status. E2E drivers assert the update-check flow
-        /// (the found version, an in-flight check, a check error) that the badge
-        /// only summarises as the boolean `.updateAvailable`. Named `updateStatus`
-        /// (not `updates`) to avoid clashing with `settings.updates`, the user's
-        /// update *preferences* — mirroring the `permissionHealth` status family.
-        /// Contains no secrets.
-        let updateStatus: UpdateStatus
         /// Pinning-relevant properties of each named scene window (settings,
         /// speaker-naming, record-app). Lets the e2e-app naming-confirm lane
         /// assert the speaker-naming window is pinned — floating + joins all
@@ -81,24 +74,6 @@
             let floating: Bool
             let canJoinAllSpaces: Bool
             let fullScreenAuxiliary: Bool
-        }
-
-        struct UpdateStatus: Codable {
-            /// True when a release newer than the running version was found.
-            let available: Bool
-            /// The available release's tag (e.g. "v1.2.3"); nil when none.
-            let availableVersion: String?
-            /// Whether the available release is a pre-release; false when none.
-            let isPrerelease: Bool
-            /// True while an update check is in flight.
-            let isChecking: Bool
-            /// The last check's error message; nil on success / not-yet-checked.
-            let lastError: String?
-
-            static let empty = Self(
-                available: false, availableVersion: nil, isPrerelease: false,
-                isChecking: false, lastError: nil,
-            )
         }
 
         struct Pipeline: Codable {
@@ -236,7 +211,6 @@
             let protocolGeneration: ProtocolGeneration
             let output: Output
             let diagnostics: Diagnostics
-            let updates: Updates
 
             struct Recording: Codable {
                 let noMic: Bool
@@ -330,19 +304,12 @@
                 static let empty = Self(verboseDiagnostics: false, debugRPCEnabled: false)
             }
 
-            struct Updates: Codable {
-                let checkForUpdates: Bool
-                let includePreReleases: Bool
-
-                static let empty = Self(checkForUpdates: false, includePreReleases: false)
-            }
-
             /// Placeholder for snapshots built without a live `AppSettings`
             /// (test fixtures, `RPCStateSnapshot.empty`).
             static let empty = Self(
                 recording: .empty, transcription: .empty,
                 diarization: .empty, protocolGeneration: .empty, output: .empty,
-                diagnostics: .empty, updates: .empty,
+                diagnostics: .empty,
             )
         }
 
@@ -359,7 +326,6 @@
             notifications: [Notification] = [],
             settings: Settings = .empty,
             badge: BadgeKind = .inactive,
-            updateStatus: UpdateStatus = .empty,
             windows: [WindowInfo] = [],
         ) {
             self.pipeline = pipeline
@@ -374,7 +340,6 @@
             self.notifications = notifications
             self.settings = settings
             self.badge = badge
-            self.updateStatus = updateStatus
             self.windows = windows
         }
 

@@ -42,7 +42,7 @@ final class MenuBarIconSnapshotTests: XCTestCase {
 
     func testStaticBadgeSnapshots() throws {
         try XCTSkipIf(isCI, "Snapshot tests are machine-dependent")
-        let staticBadges: [BadgeKind] = [.inactive, .userAction, .done, .error, .updateAvailable]
+        let staticBadges: [BadgeKind] = [.inactive, .userAction, .done, .error]
         for badge in staticBadges {
             let image = MenuBarIcon.image(badge: badge)
             assertSnapshot(of: image, as: Self.icon, named: "\(badge)")

@@ -38,7 +38,6 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
 
     private func makeSettingsView(
         settings: AppSettings? = nil,
-        updateChecker: UpdateChecker? = nil,
     ) -> SettingsView {
         // `pipelineQueue` and `onDismissJob` have no defaults on the view, so
         // they are supplied here rather than added as helper parameters: no
@@ -48,7 +47,6 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
             settings: settings ?? makeSettings(),
             whisperKitEngine: WhisperKitEngine(),
             parakeetEngine: ParakeetEngine(),
-            updateChecker: updateChecker,
             recognitionStatsLog: RecognitionStatsLog(),
             stageTimingLog: StageTimingLog(),
             pipelineQueue: PipelineQueue(),
@@ -61,9 +59,8 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
 
     private func makeGeneral(
         settings: AppSettings? = nil,
-        updateChecker: UpdateChecker? = nil,
     ) -> GeneralSettingsView {
-        GeneralSettingsView(settings: settings ?? makeSettings(), updateChecker: updateChecker)
+        GeneralSettingsView(settings: settings ?? makeSettings())
     }
 
     private func makeAudio(settings: AppSettings? = nil) -> AudioSettingsView {
@@ -105,36 +102,6 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
 
     func testViewRendersWithDefaults() throws {
         XCTAssertNoThrow(try makeSettingsView().inspect())
-    }
-
-    // MARK: - General tab
-
-    func testUpdatesSectionShownWhenCheckerProvided() throws {
-        let checker = UpdateChecker(provider: MockUpdateProvider())
-        let body = try makeGeneral(updateChecker: checker).inspect()
-        XCTAssertNoThrow(try body.find(text: "Check for Updates"))
-        XCTAssertNoThrow(try body.find(text: "Check Now"))
-    }
-
-    func testUpdatesSectionHiddenWhenNoChecker() throws {
-        let body = try makeGeneral().inspect()
-        XCTAssertThrowsError(try body.find(text: "Check Now"))
-    }
-
-    func testPreReleaseToggleShownWhenCheckEnabled() throws {
-        let settings = makeSettings()
-        settings.checkForUpdates = true
-        let checker = UpdateChecker(provider: MockUpdateProvider())
-        let body = try makeGeneral(settings: settings, updateChecker: checker).inspect()
-        XCTAssertNoThrow(try body.find(text: "Include Pre-Releases"))
-    }
-
-    func testPreReleaseToggleHiddenWhenCheckDisabled() throws {
-        let settings = makeSettings()
-        settings.checkForUpdates = false
-        let checker = UpdateChecker(provider: MockUpdateProvider())
-        let body = try makeGeneral(settings: settings, updateChecker: checker).inspect()
-        XCTAssertThrowsError(try body.find(text: "Include Pre-Releases"))
     }
 
     // MARK: - Audio tab

@@ -464,8 +464,8 @@ same convention as the other DTOs.
 - `state`: `WatchLoop.State`'s raw value — `idle`, `recording`, or `error`.
   Absent when no recording session has ever been created.
 - `badge`: what the menu bar icon is showing: `inactive`, `recording`,
-  `transcribing`, `diarizing`, `processing`, `userAction`, `done`, `error`, or
-  `updateAvailable`. This is the single richest field for a physical button or
+  `transcribing`, `diarizing`, `processing`, `userAction`, `done`, or `error`.
+  This is the single richest field for a physical button or
   status display, since it folds the whole pipeline into one glanceable value.
 - `otherRecordingActive`: some other manual recording (a different source, or
   a different app pid) owns the loop. A `start` is refused with `409` while

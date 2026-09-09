@@ -112,7 +112,7 @@ final class MenuBarIconTests: XCTestCase {
     /// NOT pick up the live `animationFrame` — otherwise the idle waveform
     /// bounces as if recording. See MenuBarIcon.image(...) frame-clamp logic.
     func testErrorOverlayDoesNotAnimateStaticBadges() {
-        let staticBadges: [BadgeKind] = [.inactive, .userAction, .done, .error, .updateAvailable]
+        let staticBadges: [BadgeKind] = [.inactive, .userAction, .done, .error]
         for badge in staticBadges {
             let frame0 = MenuBarIcon.image(badge: badge, animationFrame: 0, errorOverlay: true)
             let frame3 = MenuBarIcon.image(badge: badge, animationFrame: 3, errorOverlay: true)
@@ -182,7 +182,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .recording,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .recording)
     }
@@ -193,7 +192,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .recording,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .recording)
     }
@@ -204,7 +202,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .waitingForSpeakerCount,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .userAction)
     }
@@ -215,7 +212,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .waitingForSpeakerNames,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .userAction)
     }
@@ -226,7 +222,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .protocolReady,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .done)
     }
@@ -237,7 +232,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .error,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .error)
     }
@@ -248,7 +242,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .transcribing,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .transcribing)
     }
@@ -259,7 +252,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .recordingDone,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .transcribing)
     }
@@ -270,7 +262,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .generatingProtocol,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .processing)
     }
@@ -281,7 +272,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .transcribing,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .transcribing)
     }
@@ -292,7 +282,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .diarizing,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .diarizing)
     }
@@ -303,7 +292,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .generatingProtocol,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .processing)
     }
@@ -314,7 +302,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .waiting,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .processing)
     }
@@ -325,7 +312,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .done,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .processing)
     }
@@ -336,62 +322,36 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: .error,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .processing)
     }
 
-    // 16. UpdateAvailable when all idle
-    func testCompute_updateAvailable_returnsUpdateAvailable() {
-        let result = BadgeKind.compute(
-            recordingActive: false,
-            transcriberState: .idle,
-            activeJobState: nil,
-            updateAvailable: true,
-        )
-        XCTAssertEqual(result, .updateAvailable)
-    }
-
-    // 17. Inactive when all idle
+    // 16. Inactive when all idle
     func testCompute_allIdle_returnsInactive() {
         let result = BadgeKind.compute(
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .inactive)
     }
 
-    // 18. recordingActive true but transcriberState idle → inactive (desynced state)
+    // 17. recordingActive true but transcriberState idle → inactive (desynced state)
     func testCompute_recordingActiveIdleTranscriber_returnsInactive() {
         let result = BadgeKind.compute(
             recordingActive: true,
             transcriberState: .idle,
             activeJobState: nil,
-            updateAvailable: false,
         )
         XCTAssertEqual(result, .inactive)
     }
 
-    // 19. ActiveJob takes priority over updateAvailable
-    func testCompute_activeJob_priorityOverUpdateAvailable() {
-        let result = BadgeKind.compute(
-            recordingActive: false,
-            transcriberState: .idle,
-            activeJobState: .transcribing,
-            updateAvailable: true,
-        )
-        XCTAssertEqual(result, .transcribing)
-    }
-
-    // 19. Recording takes priority over activeJob and updateAvailable
-    func testCompute_recordingActive_priorityOverActiveJobAndUpdate() {
+    // 18. Recording takes priority over activeJob
+    func testCompute_recordingActive_priorityOverActiveJob() {
         let result = BadgeKind.compute(
             recordingActive: true,
             transcriberState: .recording,
             activeJobState: .transcribing,
-            updateAvailable: true,
         )
         XCTAssertEqual(result, .recording)
     }
@@ -401,7 +361,6 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: false,
             transcriberState: .idle,
             activeJobState: nil,
-            updateAvailable: false,
             permissionProblem: true,
         )
         XCTAssertEqual(result, .error)
@@ -412,20 +371,8 @@ final class MenuBarIconTests: XCTestCase {
             recordingActive: true,
             transcriberState: .recording,
             activeJobState: nil,
-            updateAvailable: false,
             permissionProblem: true,
         )
         XCTAssertEqual(result, .recording)
-    }
-
-    func testCompute_permissionProblemOverridesUpdate() {
-        let result = BadgeKind.compute(
-            recordingActive: false,
-            transcriberState: .idle,
-            activeJobState: nil,
-            updateAvailable: true,
-            permissionProblem: true,
-        )
-        XCTAssertEqual(result, .error)
     }
 }

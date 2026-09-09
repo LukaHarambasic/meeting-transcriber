@@ -297,26 +297,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "openAIModel"), "mistral")
     }
 
-    // MARK: - Update Settings
-
-    func testCheckForUpdatesDefault() {
-        XCTAssertTrue(settings.checkForUpdates)
-    }
-
-    func testIncludePreReleasesDefault() {
-        XCTAssertFalse(settings.includePreReleases)
-    }
-
-    func testCheckForUpdatesPersistence() {
-        settings.checkForUpdates = false
-        XCTAssertFalse(defaults.bool(forKey: "checkForUpdates"))
-    }
-
-    func testIncludePreReleasesPersistence() {
-        settings.includePreReleases = true
-        XCTAssertTrue(defaults.bool(forKey: "includePreReleases"))
-    }
-
     // MARK: - Record Only
 
     func test_recordOnly_defaultsToFalse() {

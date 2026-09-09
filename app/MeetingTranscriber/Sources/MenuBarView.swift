@@ -8,7 +8,6 @@ struct MenuBarView: View {
     /// exact case the user hit — could never be shown through it.
     let issue: RecordingIssue?
     let pipelineQueue: PipelineQueue
-    var updateChecker: UpdateChecker?
     let onRecordMeeting: () -> Void
     /// The *wide* predicate: a manual recording that is running, or a start that
     /// has registered and not yet built its loop. `state == .recording` misses
@@ -46,7 +45,6 @@ struct MenuBarView: View {
         Divider()
 
         protocolActions
-        updateSection
 
         Divider()
 
@@ -200,20 +198,6 @@ struct MenuBarView: View {
             onOpenProtocolsFolder()
         } label: {
             Label("Open Transcripts Folder", systemImage: "folder")
-        }
-    }
-
-    @ViewBuilder private var updateSection: some View {
-        if let update = updateChecker?.availableUpdate {
-            Divider()
-            Button {
-                NSWorkspace.shared.open(update.dmgURL ?? update.htmlURL)
-            } label: {
-                Label(
-                    "Update Available: \(update.tagName)",
-                    systemImage: "arrow.down.circle.fill",
-                )
-            }
         }
     }
 

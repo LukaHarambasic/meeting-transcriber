@@ -69,7 +69,6 @@ final class AppState {
 
     // MARK: - State
 
-    var updateChecker: UpdateChecker
     var selectedNamingJobID: UUID?
 
     /// Transcription-engine concern (the three engine instances, active-engine
@@ -161,16 +160,11 @@ final class AppState {
         return settings
     }
 
-    private static func makeUpdateChecker() -> UpdateChecker {
-        UpdateChecker()
-    }
-
     // MARK: - Init
 
     init(
         settings: AppSettings = AppState.makeDefaultSettings(),
         notifier: any AppNotifying = SilentNotifier(),
-        updateChecker: UpdateChecker? = nil,
         // Passed straight through to `WatchingController`; see its stored
         // property for why the default points away from production.
         askDeliverability: @escaping @Sendable () async -> AskDeliverability = { .unknown },
@@ -192,7 +186,6 @@ final class AppState {
         let warmupQueue = ModelWarmupQueue()
         self.engines = EngineController(settings: settings, warmupQueue: warmupQueue)
         self.permissions = PermissionsController(notifier: notifier)
-        self.updateChecker = updateChecker ?? Self.makeUpdateChecker()
         self.pipeline = PipelineController(settings: settings, notifier: notifier)
         self.channelHealth = ChannelHealthController(
             notifier: notifier,
@@ -435,7 +428,6 @@ final class AppState {
             recordingActive: loop?.isActive == true,
             transcriberState: loop?.transcriberState ?? .idle,
             activeJobState: pipeline.queue.activeJobs.first?.state,
-            updateAvailable: updateChecker.availableUpdate != nil,
             permissionProblem: hasPermissionProblem,
         )
     }

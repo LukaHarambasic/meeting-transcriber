@@ -22,10 +22,9 @@
             XCTAssertEqual(BadgeKind.userAction.rawValue, "userAction")
             XCTAssertEqual(BadgeKind.done.rawValue, "done")
             XCTAssertEqual(BadgeKind.error.rawValue, "error")
-            XCTAssertEqual(BadgeKind.updateAvailable.rawValue, "updateAvailable")
             // Guard: every case is pinned above — a newly-added case fails this
             // count and forces the author to add its wire string here.
-            XCTAssertEqual(BadgeKind.allCases.count, 9)
+            XCTAssertEqual(BadgeKind.allCases.count, 8)
         }
 
         // MARK: - Wiring: snapshot.badge follows currentBadge (non-vacuous)
@@ -39,18 +38,14 @@
 
             // Drive currentBadge to a NON-inactive value; the snapshot must follow.
             // A hardcoded `.inactive` in the builder would fail this.
-            let url = try XCTUnwrap(URL(string: "https://example.com"))
-            state.updateChecker.availableUpdate = ReleaseInfo(
-                tagName: "v9.9.9",
-                name: "Test Release",
-                prerelease: false,
-                htmlURL: url,
-                dmgURL: nil,
-            )
-            XCTAssertEqual(state.currentBadge, .updateAvailable)
+            state.pipeline.enqueueFiles([URL(fileURLWithPath: "/tmp/meeting.wav")])
+            let job = try XCTUnwrap(state.pipeline.queue.jobs.first)
+            state.pipeline.queue.updateJobState(id: job.id, to: .transcribing)
+
+            XCTAssertEqual(state.currentBadge, .transcribing)
             // Bind once — every rpcStateSnapshot() does a real speakers.json read.
             let snap = state.rpcStateSnapshot()
-            XCTAssertEqual(snap.badge, .updateAvailable)
+            XCTAssertEqual(snap.badge, .transcribing)
             XCTAssertEqual(snap.badge, state.currentBadge)
         }
 

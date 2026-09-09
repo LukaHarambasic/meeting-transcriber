@@ -54,8 +54,6 @@
             XCTAssertFalse(s.diarization.vadEnabled)
             XCTAssertEqual(s.diarization.clusterThreshold, AppSettings.DiarizerTuningDefaults.clusterThreshold)
             XCTAssertEqual(s.protocolGeneration.language, "English")
-            XCTAssertTrue(s.updates.checkForUpdates)
-            XCTAssertFalse(s.updates.includePreReleases)
         }
 
         // MARK: - Snapshot reflects flipped values (mutation-proof target)
@@ -71,7 +69,6 @@
             settings.vadThreshold = 0.75
             settings.diarize = false
             settings.verboseDiagnostics = true
-            settings.includePreReleases = true
 
             let s = settings.rpcSettingsSnapshot()
 
@@ -85,7 +82,6 @@
             XCTAssertEqual(s.diarization.vadThreshold, 0.75)
             XCTAssertFalse(s.diarization.diarize)
             XCTAssertTrue(s.diagnostics.verboseDiagnostics)
-            XCTAssertTrue(s.updates.includePreReleases)
         }
 
         // MARK: - Enum raw-value mapping is pinned
@@ -231,7 +227,6 @@
                 "protocolGeneration.claudeBin",
                 "output.directory", "output.hasCustomDirectory", "output.hasCustomPrompt",
                 "diagnostics.verboseDiagnostics", "diagnostics.debugRPCEnabled",
-                "updates.checkForUpdates", "updates.includePreReleases",
             ]
             XCTAssertEqual(keys, allowlist)
         }

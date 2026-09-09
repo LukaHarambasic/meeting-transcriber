@@ -131,19 +131,6 @@ final class AppStateTests: XCTestCase { // swiftlint:disable:this type_body_leng
 
     // MARK: - currentBadge integration
 
-    func testCurrentBadgeUpdateAvailableWithNoActivity() throws {
-        let (state, _) = makeState()
-        let url = try XCTUnwrap(URL(string: "https://example.com"))
-        state.updateChecker.availableUpdate = ReleaseInfo(
-            tagName: "v9.9.9",
-            name: "Test Release",
-            prerelease: false,
-            htmlURL: url,
-            dmgURL: nil,
-        )
-        XCTAssertEqual(state.currentBadge, .updateAvailable)
-    }
-
     func testCurrentBadgeRecordingWhenLoopRecording() async throws {
         let (state, _) = makeState()
         let (loop, _) = makeTestWatchLoop()

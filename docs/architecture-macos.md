@@ -110,7 +110,6 @@ State writes to `AppPaths.dataDir`; IPC + queue snapshots to `ipcDir`.
 | `AppSettings.swift` | `@Observable` settings persisted to UserDefaults |
 | `AppSettings+Computed.swift` | Values derived from stored `AppSettings` toggles, split out to keep `AppSettings.swift` under the line cap |
 | `LegacyDefaultsMigration.swift` | One-shot carry-over of settings from the pre-rename bundle identifier, since `UserDefaults` is scoped per identifier |
-| `UpdateChecker.swift` | Checks GitHub releases for newer versions, drives the menu bar update badge |
 | `Settings/PickerLanguages.swift` | Language picker entries for WhisperKit and Parakeet language selectors |
 | `LiveCaptionsState.swift` | `@Observable` live-captions state (per-channel hypotheses + finalised utterances) + RPC-wire types |
 | `LiveCaptionsOverlay.swift` | SwiftUI caption-bar content (recent finals + per-channel hypotheses) hosted in `LiveCaptionsWindow` |
@@ -303,7 +302,7 @@ PipelineQueue: waiting → transcribing → [diarizing] → generatingProtocol �
 
 ### Menu Bar Icon Animations
 
-`BadgeKind.compute(recordingActive:transcriberState:activeJobState:updateAvailable:permissionProblem:)` is the pure function that maps the combined `WatchLoop` + `PipelineQueue` state into one of `BadgeKind.inactive | .recording | .transcribing | .diarizing | .processing | .userAction | .done | .error | .updateAvailable`. `MenuBarIcon.image(badge:animationFrame:errorOverlay:)` then renders the matching animation frame.
+`BadgeKind.compute(recordingActive:transcriberState:activeJobState:permissionProblem:)` is the pure function that maps the combined `WatchLoop` + `PipelineQueue` state into one of `BadgeKind.inactive | .recording | .transcribing | .diarizing | .processing | .userAction | .done | .error`. `MenuBarIcon.image(badge:animationFrame:errorOverlay:)` then renders the matching animation frame.
 
 | State | GIF | Triggered by | Code path |
 |-------|-----|--------------|-----------|
@@ -667,7 +666,7 @@ Channel 1 is the one that was missing, and its absence was the whole defect: a d
 
 | Tab | Sections | Bindings | Local state |
 |---|---|---|---|
-| **General** | Mode (Record-only) · Updates | `settings`, `updateChecker?` | — |
+| **General** | Mode (Record-only) | `settings` | — |
 | **Audio** | Microphone · VAD | `settings` | `audioDevices` |
 | **Transcription** | Engine + per-engine options + status | `settings`, three engines | — |
 | **Speakers** | Diarization · Speaker Identity · Known Voices · Recognition Stats · Experimental Diarization Tuning | `settings`, `recognitionStatsLog`, `enrollmentDiarizerFactory` | `knownVoicesSheet` |
@@ -681,7 +680,6 @@ Channel 1 is the one that was missing, and its absence was the whole defect: a d
 - `transcriptionEngine` switches between WhisperKit / Parakeet option panels
 - `protocolProvider` switches between Claude CLI / OpenAI-compatible / None panels
 - `#if APPSTORE` removes the Claude CLI provider option entirely
-- `updateChecker == nil` hides the entire Updates section
 
 **Cross-cutting concerns owned by sub-views:**
 - `OutputSettingsView` owns OpenAI-endpoint connection testing (`testConnection()`) and custom-prompt I/O (`openCustomPrompt`, `importCustomPrompt`, reset confirmation)
