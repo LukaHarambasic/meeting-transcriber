@@ -12,8 +12,8 @@ final class ResamplingIntegrationTests: XCTestCase { // swiftlint:disable:this b
     }
 
     /// Copy a fixture into the test's tmpDir. Kept for pipeline tests as a
-    /// safety margin: `persistAudioToOutput` only relocates sources inside the
-    /// staging dir, so a Fixtures/ path is left alone today, but a test that
+    /// safety margin: `AudioPersistencePolicy` only disposes of sources inside
+    /// the staging dir, so a Fixtures/ path is left alone today, but a test that
     /// points staging at its own tmpDir would delete the shared asset.
     private func copyFixtureIntoTmp(_ name: String) throws -> URL {
         let src = fixtureURL(name)
