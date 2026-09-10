@@ -141,6 +141,11 @@ DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/usr/lib swiftlint lint -
 # (blanket_disable_command), and a site that still has a closure literal in that position must
 # NOT carry a suppression or superfluous_disable_command fails the build. Read
 # `swiftlint rules <name>` for the triggering examples rather than guessing at the shape.
+#
+# A rename is greppable; a stored property ADDED without a default is not — nothing to search,
+# yet every construction site breaks. Diff Sources against the last commit whose CI actually ran
+# a test (`cancelled` never reached the suite) for removed symbols, removed `case`s and no-default
+# `let`/`var`, then grep Tests for each; match a case as `\.name\b`, not `grep -w` (prose hides it).
 
 # Pre-push parity check (release build — catches Sendable diagnostics
 # that debug-mode tolerates; flags App Store variant when --with-appstore)
