@@ -1,3 +1,14 @@
+// swiftlint:disable file_length
+//
+// Over the 600-line cap by ~30 lines, and the usual remedy is closed here.
+// What is left to move is the still-recording confirmation block, which
+// mutates `confirmedAt`, `confirmationPromptedAt`, `lastSpeechAt` and
+// `askUnanswerable` — all `private(set)`, so an extension in a sibling file
+// cannot write them. Splitting it means widening four setters to the whole
+// module to satisfy a line count, which trades a real invariant (the recording
+// lifecycle is driven from this class alone) for a cosmetic one. The two
+// extensions that could be split already are: `WatchLoop+ManualRecording.swift`
+// and `WatchLoop+RecordOnly.swift`.
 import Foundation
 import os.log
 

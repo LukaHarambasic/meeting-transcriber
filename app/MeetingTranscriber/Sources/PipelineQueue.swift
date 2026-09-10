@@ -16,15 +16,9 @@ struct DiarizationRun {
     let combined: DiarizationResult?
 }
 
-// The class was already at the type_body_length cap; `notesFeedToProtocol`
-// (declaration + full-init assignment) is genuine per-instance state with
-// nowhere else to live (`SpeakerNamingSessionDelegate`'s `generateProtocol`
-// signature is fixed, so it can't be threaded through as a parameter — see
-// `PipelineQueue+Stages.swift`). Matches the existing per-type suppression
-// already used for the same rule on `SpeakerNamingView`.
 @MainActor
 @Observable
-// swiftlint:disable:next attributes type_body_length
+// swiftlint:disable:next attributes
 class PipelineQueue {
     /// Internal setter (not `private(set)`) because the stage and recovery
     /// extension methods in sibling files (PipelineQueue+Stages.swift,

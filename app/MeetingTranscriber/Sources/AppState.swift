@@ -172,14 +172,6 @@ final class AppState {
 
     // MARK: - Init
 
-    // 61 lines against a 60-line cap, and the three over are the notes
-    // composition: the shared store, the closure that hands a finished
-    // recording's notes to the enqueue path, and the controller. They cannot
-    // collapse further, because `WatchingController` needs the take-notes
-    // closure at construction while `NotesController` needs the controller that
-    // construction produces, so the store has to be named between them. Remove
-    // this suppression if that ordering ever stops being true.
-    // swiftlint:disable:next function_body_length
     init(
         settings: AppSettings = AppState.makeDefaultSettings(),
         notifier: any AppNotifying = SilentNotifier(),
