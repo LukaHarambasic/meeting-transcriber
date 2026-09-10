@@ -182,8 +182,15 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
 - **Stage explicitly:** `git add <file1> <file2>` — never `git add -A` or `git add .`
 - **Verify first:** run tests before committing
 - **Commit body:** document the WHY for non-trivial changes (architecture decisions, rejected alternatives)
-- **Never push to main directly.** Always create a branch, open a PR, and merge via `gh pr merge --rebase --delete-branch`. Only exception: version bumps in `VERSION` file.
-- **Rebase merge only.** Squash and merge commits are disabled by repo policy.
+- **Work on main and push to it directly.** This is a single-developer fork on one machine, so
+  there is nobody a pull request would inform and no review a merge would be waiting for. Commit
+  locally as the work lands and push to main when it is ready.
+- **Do not open a PR unless asked for one.** Three parallel branches, each with its own PR,
+  produced two independent fixes for the same Bluetooth mic-probe bug plus three duplicated test
+  repairs, and unpicking that cost more than the branches saved. If a piece of work genuinely
+  needs to sit unfinished, keep it on a branch and say so, but do not add a PR around it.
+- **Rebase merge only** where a branch does get used: rebase it onto main and fast-forward.
+  Squash and merge commits are disabled by repo policy.
 
 ## Conventions
 
