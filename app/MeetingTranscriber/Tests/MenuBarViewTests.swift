@@ -48,6 +48,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: onNameSpeakers,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -209,6 +210,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: { called = true }, // swiftlint:disable:this trailing_closure
         )
@@ -229,6 +231,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: { called = true },
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -249,6 +252,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: { called = true },
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -269,6 +273,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: { called = true },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -289,6 +294,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             // No `disable:this` on `onQuit` here, unlike the other call sites:
             // `trailing_closure` does not fire when the argument immediately
             // before the final closure is itself a closure literal, and
@@ -350,6 +356,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -382,6 +389,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -414,6 +422,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -448,6 +457,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -479,6 +489,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
@@ -613,6 +624,7 @@ final class MenuBarViewTests: XCTestCase {
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
+            onOpenNotes: {},
             onNameSpeakers: nil,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )

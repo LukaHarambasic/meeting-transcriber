@@ -48,6 +48,10 @@
             let maxWaitSeconds: Double?
         }
 
+        private struct AppendNotePayload: Decodable {
+            let text: String
+        }
+
         /// Default / hard-cap blocking-transcribe wait (seconds).
         private static let defaultTranscribeWaitSeconds: Double = 600
         private static let maxTranscribeWaitSeconds: Double = 1800
@@ -75,6 +79,10 @@
         /// - `GET  /v1/record` — manual-recording status (microphone-scoped)
         /// - `POST /v1/record` — start/stop/toggle a manual recording `{action}`,
         ///   optionally scoped to an app capture via `{source: "app", pid, appName, title}`
+        /// - `POST /v1/notes` — append a block `{text}` to the current note
+        ///   target (the live recording, or today's scratch note). The one way
+        ///   to drive the notes feature headlessly: the panel itself can never
+        ///   be automated (see `A11yID` notes-panel comment).
         func routeV1(_ request: HTTPRequest, path: String) async -> HTTPResponse {
             let idempotencyKey = request.headers["idempotency-key"]
             // `path` is query-stripped; read the opt-in off the raw target.
@@ -123,7 +131,7 @@
         /// reads the same set to decide what to hand to `routeV1`, so a third
         /// resource is added in one place: splitting the two lists is how a new
         /// resource ends up answering 404 with its handler sitting right there.
-        static let controlResourcePaths: Set<String> = ["/v1/record"]
+        static let controlResourcePaths: Set<String> = ["/v1/record", "/v1/notes"]
 
         /// The microphone-recording lifecycle resource: GET reads the status,
         /// POST applies an action and answers with the state it settled into.
@@ -142,6 +150,7 @@
             switch (path, request.method) {
             case ("/v1/record", "GET"): return jsonResponse(recordStatus())
             case ("/v1/record", "POST"): return await recordControlResponse(body: request.body)
+            case ("/v1/notes", "POST"): return appendNoteResponse(body: request.body)
             default: return HTTPResponse.notFound()
             }
         }
@@ -195,6 +204,22 @@
             case .refused: return jsonResponse(recordStatus(), status: 412, reason: "Precondition Failed")
             case .failed: return jsonResponse(recordStatus(), status: 503, reason: "Service Unavailable")
             }
+        }
+
+        // MARK: - /v1/notes
+
+        /// Append a block to whatever the current note target is (the live
+        /// recording, or today's scratch note). 400 when `text` is missing or
+        /// empty — there is nothing to append. The target itself is not part of
+        /// the request: it always follows the app's own recording state, the
+        /// same rule the panel follows, so a client can never misfile a note
+        /// against a meeting that isn't running.
+        private func appendNoteResponse(body: Data) -> HTTPResponse {
+            guard let p = try? JSONDecoder().decode(AppendNotePayload.self, from: body),
+                  !p.text.isEmpty
+            else { return HTTPResponse.badRequest() }
+            appendNote(p.text)
+            return jsonResponse(["appended": true])
         }
 
         private func enqueueResponse(body: Data, idempotencyKey: String?) -> HTTPResponse {

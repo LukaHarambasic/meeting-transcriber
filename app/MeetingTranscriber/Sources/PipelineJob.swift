@@ -82,6 +82,19 @@ struct PipelineJob: Identifiable, Codable {
     var transcriptPath: URL?
     var protocolPath: URL?
     var namingSlug: String?
+    /// Markdown the user typed in the notes panel during the recording.
+    ///
+    /// Carried on the job rather than re-read from disk at protocol time,
+    /// because the notes file is removed as it is handed over (a copy left in
+    /// the staging directory gets picked up a second time by orphan recovery)
+    /// and because protocol generation can be minutes and a speaker-naming
+    /// pause away from the recording that produced it.
+    ///
+    /// Optional, like every field added after v1: `PipelineJob` is decoded from
+    /// the pipeline snapshot, and synthesized `Codable` throws on a missing
+    /// non-optional key, so a snapshot written before this field existed would
+    /// otherwise fail to decode in its entirety.
+    var notes: String?
     /// Diarizer mode that produced the *current* `speakerNamingDataByJob`
     /// entry. Set by `PipelineQueue` after diarisation completes (in the
     /// initial pipeline run and after `lateDiarization`). Used by the
@@ -131,6 +144,7 @@ struct PipelineJob: Identifiable, Codable {
         self.transcriptPath = nil
         self.protocolPath = nil
         self.namingSlug = nil
+        self.notes = nil
         self.usedDiarizerMode = nil
         self.autoSkipNaming = autoSkipNaming
     }

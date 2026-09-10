@@ -65,6 +65,7 @@ per connection; exceeding it closes the connection without sending a response.
 | `POST` | `/v1/jobs/<id>/naming/skip` | Skip naming for a job (accept auto-assigned names). |
 | `GET`  | `/v1/record` | Read whether a microphone-only recording is running. |
 | `POST` | `/v1/record` | Start, stop or toggle a manual recording (microphone by default; a specific app or the whole system output via `source`). |
+| `POST` | `/v1/notes` | Append a block of text to the current note target (the live recording, or today's scratch note). |
 
 A query string is stripped before routing, so `/v1/jobs/<id>?foo=bar` still
 resolves the id. The one query parameter with meaning is `include=transcript`
@@ -312,6 +313,40 @@ tap regardless of the microphone grant, so a `200` is the truth there (with
 has no second channel to fall back on, so the same denied grant means nothing
 at all would be captured, and reporting success would be a lie a client could
 not detect until it went looking for the file.
+
+### POST /v1/notes
+
+Append a block of text to whatever the current note target is: the running
+recording, or today's scratch note when nothing is recording. This is the
+only way to add to a note from outside the app — the floating notes panel
+itself has no automation surface (it holds meeting content, same rule as the
+speaker-naming window), so a headless client reaches the same file through
+this endpoint instead.
+
+```bash
+curl -sS -X POST "$BASE/v1/notes" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Follow up with finance on the Q3 numbers"}'
+```
+
+Request body:
+
+```json
+{ "text": "Follow up with finance on the Q3 numbers" }
+```
+
+- `text` (required): the block to append. Joined onto the existing note with a
+  blank line in between — never overwrites what is already there.
+
+The target is never part of the request: it always follows the app's own
+recording state, the same rule the panel follows, so a client can never
+misfile a note against a meeting that isn't running.
+
+Responses:
+
+- `200 OK` with `{"appended": true}`.
+- `400 Bad Request` if `text` is missing, empty, or the body is undecodable.
 
 ## Idempotency
 

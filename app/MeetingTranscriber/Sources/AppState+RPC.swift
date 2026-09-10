@@ -15,6 +15,11 @@
                 floating: window.level == .floating,
                 canJoinAllSpaces: behavior.contains(.canJoinAllSpaces),
                 fullScreenAuxiliary: behavior.contains(.fullScreenAuxiliary),
+                // Both exist for the notes panel: a driver needs the window
+                // number to aim `screencapture -l` at it, and the flag is the
+                // in-process claim that the real capture attempt then checks.
+                windowNumber: window.windowNumber,
+                excludedFromCapture: window.sharingType == .none,
             )
         }
     }

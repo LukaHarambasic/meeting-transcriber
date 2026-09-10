@@ -16,9 +16,15 @@ struct DiarizationRun {
     let combined: DiarizationResult?
 }
 
+// The class was already at the type_body_length cap; `notesFeedToProtocol`
+// (declaration + full-init assignment) is genuine per-instance state with
+// nowhere else to live (`SpeakerNamingSessionDelegate`'s `generateProtocol`
+// signature is fixed, so it can't be threaded through as a parameter — see
+// `PipelineQueue+Stages.swift`). Matches the existing per-type suppression
+// already used for the same rule on `SpeakerNamingView`.
 @MainActor
 @Observable
-// swiftlint:disable:next attributes
+// swiftlint:disable:next attributes type_body_length
 class PipelineQueue {
     /// Internal setter (not `private(set)`) because the stage and recovery
     /// extension methods in sibling files (PipelineQueue+Stages.swift,
@@ -73,6 +79,17 @@ class PipelineQueue {
     /// nil disables JSONL logging. AppState injects a real instance for production;
     /// tests leave it nil unless they explicitly want to assert on the log.
     let recognitionStatsLog: RecognitionStatsLog?
+
+    /// Whether notes should also be fed to the protocol generator as context
+    /// (`AppSettings.notesFeedToProtocol`). Read at generation time rather
+    /// than captured once at construction: a job can sit in
+    /// `.speakerNamingPending` for as long as the user takes to confirm
+    /// speakers, long enough for the toggle to change under it. `nil` means
+    /// "feed them" (the skeleton init never sets this, and every existing
+    /// test built through it should keep whatever behaviour it already had).
+    /// The verbatim `## Notes` section written into the saved `.md` never
+    /// consults this — it is unconditional.
+    var notesFeedToProtocol: (() -> Bool)?
 
     /// nil disables per-stage timing capture. AppState injects a real instance;
     /// tests leave it nil unless asserting on the log.
@@ -326,7 +343,7 @@ class PipelineQueue {
         speakerMatcherFactory: @escaping () -> SpeakerMatcher = PipelineQueue.throwawayMatcherFactory(),
         snapshotWriter: @escaping @Sendable ([PipelineJob], URL) throws -> Void = PipelineSnapshot.save,
         vadConfig: VADConfig? = nil,
-        recognitionStatsLog: RecognitionStatsLog? = nil,
+        recognitionStatsLog: RecognitionStatsLog? = nil, notesFeedToProtocol: (() -> Bool)? = nil,
         stageTimingLog: StageTimingLog? = nil,
         completedJobLifetime: TimeInterval = 60,
         terminalJobStore: TerminalJobStore? = nil,
@@ -358,6 +375,7 @@ class PipelineQueue {
         self.snapshotWriter = snapshotWriter
         self.vadConfig = vadConfig
         self.recognitionStatsLog = recognitionStatsLog
+        self.notesFeedToProtocol = notesFeedToProtocol
         self.stageTimingLog = stageTimingLog
         self.completedJobLifetime = completedJobLifetime
         self.terminalJobStore = terminalJobStore

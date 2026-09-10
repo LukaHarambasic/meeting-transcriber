@@ -45,6 +45,13 @@ extension WatchLoop {
         let movedApp = try recording.appPath.map { try Self.move($0, into: destDir) }
         let movedMic = try recording.micPath.map { try Self.move($0, into: destDir) }
 
+        // Asked for only once the WAVs are already safely at their
+        // destination: `takeNotes` removes the source file from staging as it
+        // hands the text over, so asking any earlier and then failing to move
+        // the audio would lose the notes along with a recording that record-only
+        // never even wrote anywhere.
+        let notesFilename = try writeRecordOnlyNotes(basename: basename, destDir: destDir)
+
         let sidecar = RecordingSidecar(
             title: title,
             appName: appName,
@@ -56,9 +63,25 @@ extension WatchLoop {
             mixFilename: movedMix.lastPathComponent,
             appFilename: movedApp?.lastPathComponent,
             micFilename: movedMic?.lastPathComponent,
+            notesFilename: notesFilename,
         )
         try sidecar.write(toDirectory: destDir, basename: basename)
         logger.info("Record-only: wrote sidecar + WAVs to \(destDir.path) for \(title, privacy: .private)")
+    }
+
+    /// Writes `<basename>_notes.md` beside the WAVs when `takeNotes` has
+    /// anything to hand over, returning its filename for the sidecar (nil when
+    /// there were no notes). Same owner-only restriction as the sidecar JSON —
+    /// notes can carry the same kind of meeting content (names, decisions).
+    private func writeRecordOnlyNotes(basename: String, destDir: URL) throws -> String? {
+        guard let notes = takeNotes(basename) else { return nil }
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let notesURL = destDir.appendingPathComponent("\(basename)\(RecordingFileSuffix.notes)")
+        try notes.write(to: notesURL, atomically: true, encoding: .utf8)
+        try FileManager.default.restrictToOwner(notesURL)
+        return notesURL.lastPathComponent
     }
 
     /// Move a file into `destDir`, returning its new URL. If a file with the

@@ -252,4 +252,44 @@ assert '$rename_target' not in names, f'delete not reflected: {names}'
 " || fail "delete not reflected in knownSpeakerNames"
 ok "delete → cache updated"
 
+step "POST /v1/notes"
+
+# Missing text field -> 400.
+code=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d '{}' "http://127.0.0.1:9876/v1/notes")
+[ "$code" = "400" ] || fail "missing text field: expected 400 got $code"
+ok "missing text field → 400"
+
+# Empty text -> 400.
+code=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d '{"text":""}' "http://127.0.0.1:9876/v1/notes")
+[ "$code" = "400" ] || fail "empty text: expected 400 got $code"
+ok "empty text → 400"
+
+# A real append -> 200 with a body, and the text lands on disk. No recording
+# is running, so this appends to today's scratch note under the effective
+# output dir (settings.output.directory in /state, same field the Output
+# Settings tab reads).
+note_marker="rpc-smoketest-note-$$"
+code=$(curl -s -o /tmp/rpc-smoke-notes-response.json -w "%{http_code}" \
+    -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d "{\"text\":\"$note_marker\"}" "http://127.0.0.1:9876/v1/notes")
+[ "$code" = "200" ] || fail "append note: expected 200 got $code"
+body=$(cat /tmp/rpc-smoke-notes-response.json)
+[ -n "$body" ] || fail "append note: expected a non-empty response body"
+ok "append note → 200 ($body)"
+
+output_dir=$("$MT_CLI_BIN" state | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d['settings']['output']['directory'] or '')
+")
+[ -n "$output_dir" ] || fail "could not read settings.output.directory from /state"
+notes_file="$output_dir/notes/$(date +%Y-%m-%d).md"
+[ -f "$notes_file" ] || fail "expected scratch notes file at $notes_file"
+grep -q "$note_marker" "$notes_file" || fail "appended text not found in $notes_file"
+ok "appended text readable back from $notes_file"
+
 step "All checks passed"

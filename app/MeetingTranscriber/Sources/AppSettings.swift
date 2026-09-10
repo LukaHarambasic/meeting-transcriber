@@ -155,6 +155,23 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Notes
+
+    /// Whether the ⌥⌘N global hotkey for the notes panel is registered.
+    /// Default: on. Off unregisters it; the menu item still opens the panel, so
+    /// turning this off costs the shortcut, not the feature.
+    var notesHotkeyEnabled: Bool {
+        didSet { defaults.set(notesHotkeyEnabled, forKey: "notesHotkeyEnabled") }
+    }
+
+    /// Whether meeting notes are handed to the protocol generator as
+    /// authoritative context, on top of being written into the `.md` verbatim.
+    /// Default: on. Off keeps the verbatim section and leaves the summary to be
+    /// written from the transcript alone.
+    var notesFeedToProtocol: Bool {
+        didSet { defaults.set(notesFeedToProtocol, forKey: "notesFeedToProtocol") }
+    }
+
     /// Label for the local mic speaker in dual-source mode.
     /// Default "Me". Empty string = diarize mic track (multi-person room).
     var micName: String {
@@ -409,6 +426,8 @@ final class AppSettings {
         micName = defaults.object(forKey: "micName") as? String ?? "Me"
         perChannelIndicatorEnabled = defaults.object(forKey: "perChannelIndicatorEnabled") as? Bool ?? true
         liveTranscriptionEnabled = defaults.object(forKey: "liveTranscriptionEnabled") as? Bool ?? false
+        notesHotkeyEnabled = defaults.object(forKey: "notesHotkeyEnabled") as? Bool ?? true
+        notesFeedToProtocol = defaults.object(forKey: "notesFeedToProtocol") as? Bool ?? true
         asymmetricSilenceWarningSeconds = max(30, min(300, defaults.object(forKey: "asymmetricSilenceWarningSeconds") as? Double ?? 90))
 
         transcriptionEngine = (defaults.string(forKey: "transcriptionEngine")

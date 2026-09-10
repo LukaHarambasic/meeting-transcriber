@@ -23,6 +23,16 @@ protocol RecordingProvider {
     /// Default false so mocks that do not simulate capture failures stay quiet.
     var appCaptureGaveUp: Bool { get }
     var micCaptureGaveUp: Bool { get }
+
+    /// Filename stem of the recording in progress (`yyyyMMdd_HHmmss`), nil
+    /// between recordings.
+    ///
+    /// Exposed for the notes panel, which has to name its file after the
+    /// recording it belongs to *while that recording is still running* — the
+    /// stem is the only identifier that exists at that point, and it is the one
+    /// the recovery path uses too, so notes and audio survive a crash together.
+    /// Default nil so mocks that do not name files stay quiet.
+    var currentStem: String? { get }
 }
 
 extension RecordingProvider {
@@ -40,5 +50,9 @@ extension RecordingProvider {
 
     var micCaptureGaveUp: Bool {
         false
+    }
+
+    var currentStem: String? {
+        nil
     }
 }

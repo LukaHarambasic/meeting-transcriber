@@ -27,16 +27,18 @@
             title _: String,
             diarized: Bool,
             meetingStartTime: Date?,
+            notes: String? = nil,
         ) async throws -> String {
-            let prompt = ProtocolGenerator.buildSystemPrompt(diarized: diarized, language: language, meetingStartTime: meetingStartTime) + transcript
+            let prompt = ProtocolGenerator.buildSystemPrompt(
+                diarized: diarized, language: language, meetingStartTime: meetingStartTime, notes: notes,
+            ) + transcript
 
             let process = Process()
             let resolvedBin = Self.resolveClaudePath(claudeBin)
             process.executableURL = URL(fileURLWithPath: resolvedBin)
             process.arguments = Self.buildSubprocessArgs(claudeBin: claudeBin, resolvedBin: resolvedBin)
             process.environment = Self.buildEnvironment(
-                baseEnvironment: ProcessInfo.processInfo.environment,
-                searchPaths: Self.searchPaths,
+                baseEnvironment: ProcessInfo.processInfo.environment, searchPaths: Self.searchPaths,
             )
 
             let stdinPipe = Pipe()

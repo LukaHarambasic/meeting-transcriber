@@ -113,6 +113,15 @@ class WatchLoop {
     /// `@MainActor` like `recorderFactory`: the production closure captures a
     /// non-`Sendable` existential, which is otherwise a data-race error.
     let askDeliverability: @MainActor () async -> AskDeliverability
+    /// Hands over the markdown the user typed during the recording with this
+    /// stem, removing it from the staging directory as it goes.
+    ///
+    /// Injected for the same reason as `salvageInterrupted`: the production
+    /// implementation reads and deletes files under `AppPaths.recordingsDir`,
+    /// and the assertion worth making here is that the *enqueue path asks for
+    /// them*, not that the file layer works. Defaults to "no notes", which is
+    /// also every existing test's expectation.
+    let takeNotes: (String) -> String?
 
     /// When this recording was last known to be wanted: its start, or the
     /// user's last confirmation. `private(set)` for the RPC snapshot and tests.
@@ -138,6 +147,27 @@ class WatchLoop {
     /// recording. Read by `AppState` to put a row in the menu, because the menu
     /// is the only channel that is reachable when notifications are not.
     private(set) var askUnanswerable: Bool = false
+    /// When the recording in flight began, or nil when none is.
+    ///
+    /// Distinct from `confirmedAt`, which starts equal to this and then moves
+    /// every time the user answers a still-recording ask — using that as the
+    /// meeting start would make a ⌘T note stamp read `[00:00]` in the middle of
+    /// an hour-long call.
+    private(set) var recordingStartedAt: Date?
+
+    /// Where a note typed right now belongs: this recording, or today.
+    ///
+    /// Resolved here because this type is the one that knows whether a recording
+    /// exists and which stem it is writing under. The stem comes from the
+    /// recorder rather than being recomputed, so the notes file and the audio
+    /// files cannot disagree about which meeting they belong to.
+    var noteTarget: NoteTarget {
+        NoteTargetPolicy.target(
+            recordingStem: activeRecorder?.currentStem,
+            recordingStartedAt: recordingStartedAt,
+            now: nowProvider(),
+        )
+    }
 
     /// Hook called when state changes (for UI updates, notifications, etc.)
     var onStateChange: ((State, State) -> Void)?
@@ -166,6 +196,7 @@ class WatchLoop {
             DualSourceRecorder.recoverCrashedRecordings(minAge: 0)
         },
         askDeliverability: @MainActor @escaping () async -> AskDeliverability = { .unknown },
+        takeNotes: @escaping (String) -> String? = { _ in nil },
     ) {
         self.recorderFactory = recorderFactory
         self.pipelineQueue = pipelineQueue
@@ -184,6 +215,7 @@ class WatchLoop {
         self.confirmationPolicy = confirmationPolicy
         self.salvageInterrupted = salvageInterrupted
         self.askDeliverability = askDeliverability
+        self.takeNotes = takeNotes
     }
 
     nonisolated static var defaultOutputDir: URL {
@@ -275,6 +307,7 @@ class WatchLoop {
         // would otherwise leave the Mac awake for a recording that never
         // happened, and nothing releases an assertion no recording owns.
         sleepBlocker?.hold(reason: "Meeting Transcriber is recording")
+        recordingStartedAt = nowProvider()
         confirmedAt = nowProvider()
         confirmationPromptedAt = nil
         // Both are per-recording. Carrying `lastSpeechAt` over would let the
@@ -327,6 +360,7 @@ class WatchLoop {
         sleepBlocker?.release()
         confirmationPromptedAt = nil
         activeRecorder = nil
+        recordingStartedAt = nil
         update { next in
             next.phase = .idle
             next.manualRecordingInfo = nil
@@ -341,6 +375,7 @@ class WatchLoop {
         sleepBlocker?.release()
         confirmationPromptedAt = nil
         activeRecorder = nil
+        recordingStartedAt = nil
         update { next in next.manualRecordingInfo = nil }
     }
 
@@ -523,7 +558,7 @@ class WatchLoop {
             return
         }
 
-        let job = PipelineJob(
+        var job = PipelineJob(
             meetingTitle: title,
             appName: appName,
             mixPath: recording.mixPath,
@@ -532,8 +567,26 @@ class WatchLoop {
             micDelay: recording.micDelay,
             meetingStartTime: recording.recordingStartDate,
         )
+        // The stem comes from whichever of the recording's own files exists
+        // rather than being recomputed, so the notes lookup can never disagree
+        // with what the recorder actually wrote (`activeRecorder.currentStem`
+        // is already cleared by the time `stop()` returns). A recording whose
+        // stem can't be derived still enqueues, just with nil notes.
+        job.notes = Self.recordingStem(for: recording).flatMap(takeNotes)
         pipelineQueue?.enqueue(job)
         logger.info("Enqueued pipeline job for: \(title, privacy: .private)")
+    }
+
+    /// Stem shared by a recording's own audio filenames (`<stem>_mix.wav`
+    /// etc.), read off whichever file the recording actually produced. Nil
+    /// when none of the three matches the naming convention — a shape that
+    /// should be unreachable outside a test double, but must not crash the
+    /// enqueue path if it happens.
+    private static func recordingStem(for recording: RecordingResult) -> String? {
+        let files: [URL?] = [recording.mixPath, recording.appPath, recording.micPath]
+        return files.compactMap(\.self)
+            .compactMap { RecordingFileSuffix.stripSuffix(from: $0.lastPathComponent)?.stem }
+            .first
     }
 
     /// Single funnel through which every observable-field mutation flows.

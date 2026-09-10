@@ -74,6 +74,23 @@
             let floating: Bool
             let canJoinAllSpaces: Bool
             let fullScreenAuxiliary: Bool
+            /// `NSWindow.windowNumber` — the id `/usr/sbin/screencapture -l`
+            /// and other CGWindowID-based tools need to target this window.
+            /// `var` (not `let`), with a default: a `let` with an initial value
+            /// is excluded from Codable's synthesized decode, which errors here
+            /// under this package's warnings-as-errors build. Defaulted so
+            /// existing callers that predate this field (and don't have a live
+            /// `NSWindow` handy) keep compiling; a caller building from a real
+            /// window should always pass the real value.
+            var windowNumber: Int = 0
+            /// `sharingType == .none` — true means this window is excluded from
+            /// screen capture at the WindowServer level. A driver proves the
+            /// real-world property separately (attempting `screencapture -l
+            /// <windowNumber>` and asserting the exit code) rather than trusting
+            /// this flag alone, since a static projection can drift from the OS
+            /// behaviour it describes. `var` + default for the same Codable
+            /// reason as `windowNumber` above.
+            var excludedFromCapture: Bool = false
         }
 
         struct Pipeline: Codable {

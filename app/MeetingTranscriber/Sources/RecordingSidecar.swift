@@ -11,8 +11,8 @@ struct RecordingSidecar: Codable {
 
     /// Schema version stamped into every new sidecar. Bump when fields are
     /// added/removed/repurposed so downstream consumers can branch on it.
-    /// 2 added `trigger`.
-    static let currentVersion = 2
+    /// 2 added `trigger`. 3 added `files.notes`.
+    static let currentVersion = 3
 
     /// How the recording was started. Consumers apply different policies to
     /// the two: a very short auto capture is usually a false trigger worth
@@ -52,6 +52,12 @@ struct RecordingSidecar: Codable {
         let mix: String
         let app: String?
         let mic: String?
+        /// Filename of the `_notes.md` written beside the WAVs, or nil when
+        /// the recording carried no notes. Optional like `app`/`mic`: a
+        /// missing key (every sidecar written before version 3) decodes as
+        /// nil rather than throwing, via the same synthesized-Decodable
+        /// `decodeIfPresent` behaviour those two already rely on.
+        let notes: String?
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -71,6 +77,7 @@ struct RecordingSidecar: Codable {
         mixFilename: String,
         appFilename: String?,
         micFilename: String?,
+        notesFilename: String? = nil,
     ) {
         self.version = Self.currentVersion
         self.title = title
@@ -80,7 +87,7 @@ struct RecordingSidecar: Codable {
         self.participants = participants
         self.micDelaySeconds = micDelaySeconds
         self.triggerRaw = trigger.rawValue
-        self.files = Files(mix: mixFilename, app: appFilename, mic: micFilename)
+        self.files = Files(mix: mixFilename, app: appFilename, mic: micFilename, notes: notesFilename)
     }
 
     /// Writes the sidecar as `<basename>\(filenameSuffix)` into `directory`.

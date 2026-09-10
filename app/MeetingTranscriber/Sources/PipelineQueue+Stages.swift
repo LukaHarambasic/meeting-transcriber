@@ -733,12 +733,27 @@ extension PipelineQueue {
         return nil
     }
 
+    /// Frontmatter first: the `.md` is the artifact anything downstream reads,
+    /// and without it every consumer has to parse prose back out of the body
+    /// to learn when the meeting was or who was in it. Shared by the LLM path
+    /// and the notes-only fallback so both artifacts carry the same metadata.
+    private func protocolFrontmatter(job: PipelineJob?, title: String, transcript: String) -> String {
+        ProtocolFrontmatter(
+            title: title,
+            startedAt: job?.meetingStartTime,
+            durationSeconds: nil,
+            participants: job?.participants ?? [],
+            speakers: ProtocolFrontmatter.speakers(inTranscript: transcript),
+            appName: job?.appName,
+            engine: engineFrontmatterName,
+            language: nil,
+            audioPath: nil,
+        ).render()
+    }
+
     func generateProtocol(
         jobID: UUID, transcript: String, title: String, protocolsDir: URL,
     ) async {
-        guard let protocolGeneratorFactory, let generator = protocolGeneratorFactory() else {
-            return
-        }
         let shortID = PipelineJob.shortID(for: jobID)
         // Reuse the basename fixed when the transcript was saved (persisted as
         // namingSlug), so the .md shares the .txt/audio stem exactly. This runs
@@ -747,65 +762,128 @@ extension PipelineQueue {
         let job = jobs.first { $0.id == jobID }
         let basename = job?.namingSlug
             ?? Self.namingSlug(title: title, jobID: jobID, startTime: Date())
-        let meetingStartTime = job?.meetingStartTime
+
+        guard let protocolGeneratorFactory, let generator = protocolGeneratorFactory() else {
+            // No provider configured (AppSettings.protocolProvider == .none):
+            // there is no protocol body, but the user's own notes still have
+            // to reach them — this is the path where verbatim is the entire
+            // feature.
+            saveNotesOnlyProtocol(job: job, title: title, basename: basename, protocolsDir: protocolsDir)
+            return
+        }
         do {
             updateJobState(id: jobID, to: .generatingProtocol)
             startElapsedTimer()
+            // Resolved here rather than in a helper: `generator` is a
+            // non-Sendable existential, and handing it across a function
+            // boundary before the `await` trips Swift's cross-isolation
+            // "sending" check even though both sides run on the same
+            // (@MainActor) queue.
             let diarized = transcript.range(
                 of: #"\[\w[\w\s]*\]"#, options: .regularExpression,
             ) != nil
+            let notesToFeed: String? = (notesFeedToProtocol?() ?? true) ? job?.notes : nil
             let protocolMD = try await generator.generate(
                 transcript: transcript,
                 title: title,
                 diarized: diarized,
-                meetingStartTime: meetingStartTime,
+                meetingStartTime: job?.meetingStartTime,
+                notes: notesToFeed,
             )
-            // Frontmatter first: the `.md` is the artifact anything downstream
-            // reads, and without it every consumer has to parse prose back out
-            // of the body to learn when the meeting was or who was in it.
-            let frontmatter = ProtocolFrontmatter(
-                title: title,
-                startedAt: meetingStartTime,
-                durationSeconds: nil,
-                participants: job?.participants ?? [],
-                speakers: ProtocolFrontmatter.speakers(inTranscript: transcript),
-                appName: job?.appName,
-                engine: engineFrontmatterName,
-                language: nil,
-                audioPath: nil,
-            ).render()
-            let fullMD = frontmatter + protocolMD
-                + "\n\n---\n\n## Full Transcript\n\n" + transcript
-            let mdPath = try ProtocolGenerator.saveProtocol(
-                fullMD, basename: basename, dir: protocolsDir,
+            try saveGeneratedProtocol(
+                context: .init(jobID: jobID, title: title, basename: basename, protocolsDir: protocolsDir),
+                transcript: transcript, protocolMD: protocolMD,
             )
-            logger.info("[\(shortID, privacy: .public)] protocol_saved file=\(mdPath.lastPathComponent, privacy: .private)")
-            if let idx = jobs.firstIndex(where: { $0.id == jobID }) {
-                jobs[idx].protocolPath = mdPath
-                // The `.txt` was only ever an intermediate: the `.md` contains
-                // the same transcript under "Full Transcript", so keeping both
-                // put two files per meeting in a folder meant to hold one.
-                //
-                // Deleted here and nowhere else, because here is the only point
-                // where the `.md` is known to exist. Protocol generation can
-                // fail (the catch below warns "transcript saved"), and on that
-                // path the `.txt` is the only copy of the words.
-                //
-                // Cost, accepted: late speaker re-confirmation reads this file
-                // to regenerate a protocol with corrected names, so it can no
-                // longer do that. Renaming now happens against the `.md`, whose
-                // frontmatter lists the speaker labels to swap.
-                if let txtPath = jobs[idx].transcriptPath {
-                    try? FileManager.default.removeItem(at: txtPath)
-                    jobs[idx].transcriptPath = nil
-                }
-            }
             stopElapsedTimer()
         } catch {
             logger.warning("[\(shortID, privacy: .public)] protocol_generation_failed error=\(error.localizedDescription, privacy: .public)")
             addWarning(id: jobID, "Transcript generation failed; raw text saved")
+            // The LLM call (or the save above) failing must not take the
+            // user's own notes down with it — save them on their own next to
+            // the raw transcript the warning above already points at.
+            saveNotesOnlyProtocol(job: job, title: title, basename: basename, protocolsDir: protocolsDir)
             stopElapsedTimer()
         }
+    }
+
+    /// Bundles the identifying pieces `saveGeneratedProtocol` needs, purely to
+    /// stay under the parameter-count cap — none of these vary independently
+    /// of "which job, which file".
+    private struct ProtocolSaveContext {
+        let jobID: UUID
+        let title: String
+        let basename: String
+        let protocolsDir: URL
+    }
+
+    /// Composes frontmatter + verbatim notes + the LLM body + the transcript
+    /// into the saved `.md`, then retires the now-redundant `.txt`. The notes
+    /// section is unconditional here — never gated on `notesFeedToProtocol`,
+    /// which only controls whether the LLM saw them.
+    private func saveGeneratedProtocol(
+        context: ProtocolSaveContext, transcript: String, protocolMD: String,
+    ) throws {
+        let job = jobs.first { $0.id == context.jobID }
+        let frontmatter = protocolFrontmatter(job: job, title: context.title, transcript: transcript)
+        let notesBlock: String = Self.verbatimNotesBlock(job?.notes)
+        let fullMD = frontmatter + notesBlock + protocolMD
+            + "\n\n---\n\n## Full Transcript\n\n" + transcript
+        let mdPath = try ProtocolGenerator.saveProtocol(
+            fullMD, basename: context.basename, dir: context.protocolsDir,
+        )
+        let shortID = PipelineJob.shortID(for: context.jobID)
+        logger.info("[\(shortID, privacy: .public)] protocol_saved file=\(mdPath.lastPathComponent, privacy: .private)")
+        guard let idx = jobs.firstIndex(where: { $0.id == context.jobID }) else { return }
+        jobs[idx].protocolPath = mdPath
+        // The `.txt` was only ever an intermediate: the `.md` contains the
+        // same transcript under "Full Transcript", so keeping both put two
+        // files per meeting in a folder meant to hold one.
+        //
+        // Deleted here and nowhere else, because here is the only point where
+        // the `.md` is known to exist. Protocol generation can fail (the
+        // caller's catch warns "transcript saved"), and on that path the
+        // `.txt` is the only copy of the words.
+        //
+        // Cost, accepted: late speaker re-confirmation reads this file to
+        // regenerate a protocol with corrected names, so it can no longer do
+        // that. Renaming now happens against the `.md`, whose frontmatter
+        // lists the speaker labels to swap.
+        if let txtPath = jobs[idx].transcriptPath {
+            try? FileManager.default.removeItem(at: txtPath)
+            jobs[idx].transcriptPath = nil
+        }
+    }
+
+    /// The `## Notes` section plus its trailing separator, or an empty string
+    /// when there is nothing to add. `NotesMerge.section` owns the heading
+    /// text; this only decides whether to call it and adds the blank-line
+    /// separator the caller's concatenation needs.
+    private static func verbatimNotesBlock(_ notes: String?) -> String {
+        guard let notes else { return "" }
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return NotesMerge.section(notes: trimmed) + "\n\n"
+    }
+
+    /// Writes a notes-only `.md` (frontmatter + verbatim `## Notes`) when no
+    /// protocol body exists at all — no generator configured, or generation
+    /// failed. The verbatim section is the whole point of `## Notes`: it must
+    /// never depend on an LLM call succeeding. No-op when the job carries no
+    /// notes, so every no-generator/failure path that never sets `job.notes`
+    /// (every test predating this feature) is unaffected.
+    private func saveNotesOnlyProtocol(job: PipelineJob?, title: String, basename: String, protocolsDir: URL) {
+        guard let notes = job?.notes else { return }
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let frontmatter = protocolFrontmatter(job: job, title: title, transcript: "")
+        let notesDoc: String = frontmatter + NotesMerge.section(notes: trimmed)
+        guard let mdPath = try? ProtocolGenerator.saveProtocol(notesDoc, basename: basename, dir: protocolsDir)
+        else { return }
+        if let jobID = job?.id, let idx = jobs.firstIndex(where: { $0.id == jobID }) {
+            jobs[idx].protocolPath = mdPath
+        }
+        logger.info("notes_only_protocol_saved file=\(mdPath.lastPathComponent, privacy: .private)")
     }
 
     // MARK: - VAD Preprocessing

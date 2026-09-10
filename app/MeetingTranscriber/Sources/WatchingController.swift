@@ -109,6 +109,11 @@ final class WatchingController {
     /// The production closure is supplied by the composition root, which is the
     /// only place that knows about `NotificationManager`.
     private let askDeliverability: @Sendable () async -> AskDeliverability
+    /// Passed straight through to each `WatchLoop` this controller builds, so
+    /// the enqueue path can hand a recording's notes to its job. Defaulted away
+    /// from production here for the same reason as `recoverInterrupted`: no test
+    /// should reach the real staging directory by omission.
+    private let takeNotes: (String) -> String?
 
     init(
         settings: AppSettings,
@@ -131,6 +136,7 @@ final class WatchingController {
             DualSourceRecorder.recoverCrashedRecordings(minAge: 0)
         },
         askDeliverability: @escaping @Sendable () async -> AskDeliverability = { .unknown },
+        takeNotes: @escaping (String) -> String? = { _ in nil },
     ) {
         self.settings = settings
         self.notifier = notifier
@@ -146,6 +152,7 @@ final class WatchingController {
         self.makeSleepBlocker = makeSleepBlocker
         self.confirmationPolicy = confirmationPolicy
         self.recoverInterrupted = recoverInterrupted
+        self.takeNotes = takeNotes
     }
 
     // MARK: - Derived
@@ -278,6 +285,7 @@ final class WatchingController {
             sleepBlocker: makeSleepBlocker(),
             confirmationPolicy: confirmationPolicy,
             askDeliverability: askDeliverability,
+            takeNotes: takeNotes,
         )
         watchLoop = loop
 

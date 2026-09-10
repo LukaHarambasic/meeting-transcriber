@@ -40,6 +40,17 @@ enum RecordingFileSuffix {
     /// crash recovery and temp cleanup.
     static let appRawAny: [String] = [appRaw, legacyAppRaw]
 
+    /// Markdown notes typed during the recording, autosaved next to its audio.
+    ///
+    /// Deliberately in the staging directory rather than somewhere of its own:
+    /// a crash or a forced sleep leaves the notes beside the tracks they belong
+    /// to, so the recovery path that re-mixes an interrupted recording can find
+    /// them by the same stem instead of the notes outliving the meeting alone.
+    ///
+    /// Kept out of `all`, which is the *audio* suffix list crash recovery
+    /// iterates — a notes file is not a track and must never be mixed.
+    static let notes = "_notes.md"
+
     /// Strip the in-progress marker suffix, or nil when `filename` is not one.
     static func stripInProgress(from filename: String) -> String? {
         filename.hasSuffix(inProgress) ? String(filename.dropLast(inProgress.count)) : nil

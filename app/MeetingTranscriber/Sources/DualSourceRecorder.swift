@@ -44,7 +44,9 @@ class DualSourceRecorder: RecordingProvider {
     private var captureSession: (any AudioCapturing)?
     private(set) var isRecording = false
     private(set) var recordingStartDate: Date = .distantPast
-    private var startTimestamp: String?
+    /// `RecordingProvider.currentStem`: set in `start()`, cleared on both stop
+    /// paths, so it is nil exactly when no recording is in flight.
+    private(set) var currentStem: String?
 
     var appLevelDBFS: Double {
         captureSession?.appLevelDBFS ?? -120
@@ -392,7 +394,7 @@ class DualSourceRecorder: RecordingProvider {
         try FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
 
         let ts = Self.timestamp()
-        startTimestamp = ts
+        currentStem = ts
 
         // Written before capture opens and removed in `stop()`, so a surviving
         // one means this process died mid-recording. The app temp says the same
@@ -445,7 +447,7 @@ class DualSourceRecorder: RecordingProvider {
             // tracks this start never created. The marker means "interrupted
             // mid-recording", and a start that never opened is not that.
             try? FileManager.default.removeItem(at: Self.inProgressMarker(stem: ts, in: recordingsDir))
-            startTimestamp = nil
+            currentStem = nil
             throw error
         }
         captureSession = session
@@ -473,8 +475,8 @@ class DualSourceRecorder: RecordingProvider {
         let captureResult = session.stop()
         captureSession = nil
 
-        let ts = startTimestamp ?? Self.timestamp()
-        startTimestamp = nil
+        let ts = currentStem ?? Self.timestamp()
+        currentStem = nil
 
         // The capture session writes 16 kHz mono (in-IOProc resample), so that —
         // not the device-facing recordRate/appChannels — is the expected file

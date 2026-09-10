@@ -5,6 +5,10 @@ extension Notification.Name {
     static let showSpeakerNaming = Notification.Name("showSpeakerNaming")
     static let showSettings = Notification.Name("showSettings")
     static let closeSettings = Notification.Name("closeSettings")
+    /// Posted by the debug RPC `/action/openNotes` / `/action/closeNotes`, so a
+    /// driver can put the notes panel on screen without a synthetic keystroke.
+    static let showNotes = Notification.Name("showNotes")
+    static let closeNotes = Notification.Name("closeNotes")
 }
 
 /// Renders the menu-bar icon and ticks the animation frame in its own
@@ -70,6 +74,31 @@ private struct WindowAccessor: NSViewRepresentable {
     }
 }
 
+/// The notes panel's three scene-level reactions, in a modifier of their own.
+///
+/// Not three `.onChange` modifiers in the scene body: added there they pushed
+/// its type-check to 321 ms against the package's 300 ms hard limit, the same
+/// budget that already forced the `MenuBarView` and `AppState` splits. A
+/// modifier gets its own `body`, so the cost lands in a separate budget.
+///
+/// Takes plain values and closures rather than `AppState`, which keeps it
+/// independent of the observation graph and testable on its own.
+private struct NotesSceneWiring: ViewModifier {
+    let isVisible: Bool
+    let hotkeyEnabled: Bool
+    let isRecording: Bool
+    let onVisibilityChange: (Bool) -> Void
+    let onHotkeySettingChange: (Bool) -> Void
+    let onRecordingChange: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: isVisible) { _, visible in onVisibilityChange(visible) }
+            .onChange(of: hotkeyEnabled, initial: true) { _, enabled in onHotkeySettingChange(enabled) }
+            .onChange(of: isRecording) { _, _ in onRecordingChange() }
+    }
+}
+
 @main
 struct MeetingTranscriberApp: App {
     // `askDeliverability` is wired here rather than derived from the notifier:
@@ -84,6 +113,14 @@ struct MeetingTranscriberApp: App {
         askDeliverability: { await NotificationManager.shared.alertDeliverability() },
     )
     @State private var captionsWindow: LiveCaptionsWindowController?
+    /// Built on first use, like `captionsWindow`: the panel is an `NSPanel`
+    /// rather than a SwiftUI `Window` scene because it needs
+    /// `.nonactivatingPanel` and `sharingType = .none`, and neither is reachable
+    /// from a scene modifier on the macOS 14 floor.
+    @State private var notesWindow: NotesWindowController?
+    /// Held for the process lifetime while the setting is on; releasing it
+    /// unregisters the ⌥⌘N claim with the Carbon Event Manager.
+    @State private var notesHotkey: GlobalHotkey?
     @Environment(\.openWindow)
     private var openWindow
 
@@ -112,6 +149,7 @@ struct MeetingTranscriberApp: App {
                 onOpenSettings: {
                     bringWindowToFront(id: "settings")
                 },
+                onOpenNotes: toggleNotes,
                 onNameSpeakers: appState.hasPendingSpeakerNamingJobs ? {
                     bringWindowToFront(id: "speaker-naming")
                 } : nil,
@@ -139,6 +177,12 @@ struct MeetingTranscriberApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .closeSettings)) { _ in
                 closeWindow(id: "settings")
             }
+            .onReceive(NotificationCenter.default.publisher(for: .showNotes)) { _ in
+                appState.notes.open()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .closeNotes)) { _ in
+                appState.notes.close()
+            }
             .task {
                 await appState.engines.preloadActiveModel()
             }
@@ -156,6 +200,7 @@ struct MeetingTranscriberApp: App {
                     await appState.permissions.check(minimumInterval: 3)
                 }
             }
+            .modifier(notesWiring)
             .onChange(of: appState.shouldShowLiveCaptions, initial: true) { _, visible in
                 let controller = captionsWindow ?? LiveCaptionsWindowController(state: appState.liveCaptions)
                 captionsWindow = controller
@@ -270,6 +315,78 @@ struct MeetingTranscriberApp: App {
                 }
             },
         )
+    }
+
+    // MARK: - Notes panel
+
+    /// The notes wiring, constructed outside the scene body.
+    ///
+    /// Even as a single `.modifier(...)` call, building this inline left the
+    /// body at 313 ms against a 300 ms limit: six arguments is six more
+    /// expressions for the type-checker. An explicitly-typed property moves
+    /// that cost into its own budget. The observable reads still happen during
+    /// body evaluation, so the scene keeps tracking all three values.
+    private var notesWiring: NotesSceneWiring {
+        NotesSceneWiring(
+            isVisible: appState.notes.isVisible,
+            hotkeyEnabled: appState.settings.notesHotkeyEnabled,
+            isRecording: appState.watching.isRecording,
+            onVisibilityChange: applyNotesVisibility,
+            onHotkeySettingChange: applyNotesHotkeySetting,
+            onRecordingChange: retargetNotes,
+        )
+    }
+
+    /// Show or hide the notes panel, building it on first use.
+    ///
+    /// Split out of the scene body for the type-check budget the package
+    /// enforces as an error, and because the hosting view has to be constructed
+    /// exactly once: a fresh `NSHostingView` per toggle would drop the text
+    /// view's first responder status and the caret with it.
+    private func applyNotesVisibility(_ visible: Bool) {
+        let controller: NotesWindowController = notesWindow ?? {
+            let host = NSHostingView(rootView: NotesEditorView(controller: appState.notes))
+            let made = NotesWindowController(contentView: host)
+            notesWindow = made
+            return made
+        }()
+        if visible {
+            controller.show()
+            // The panel is `.nonactivatingPanel`, so it can take keys without
+            // pulling the whole app forward, but it does need to *be* the key
+            // window for typing to reach it.
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            controller.hide()
+        }
+    }
+
+    /// A recording starting or stopping changes where a note belongs.
+    /// Re-targeting reloads from the new destination rather than carrying text
+    /// across: words typed before a meeting started were not said in it.
+    ///
+    /// Named rather than a closure literal at the call site, which is the shape
+    /// SwiftLint's `trailing_closure` rule wants here.
+    private func retargetNotes() {
+        appState.notes.retarget()
+    }
+
+    /// The menu row's action. Named rather than a closure literal at the call
+    /// site, which is what SwiftLint's `trailing_closure` rule wants in an
+    /// argument list whose neighbours are closures.
+    private func toggleNotes() {
+        appState.notes.toggle()
+    }
+
+    /// Register or release the ⌥⌘N claim to match the setting.
+    private func applyNotesHotkeySetting(_ enabled: Bool) {
+        guard enabled else {
+            notesHotkey?.stop()
+            notesHotkey = nil
+            return
+        }
+        guard notesHotkey == nil else { return }
+        notesHotkey = GlobalHotkey { appState.notes.toggle() }
     }
 
     // MARK: - UI Actions

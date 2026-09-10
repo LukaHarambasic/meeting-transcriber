@@ -18,6 +18,9 @@ struct MenuBarView: View {
     let onOpenLastProtocol: () -> Void
     let onOpenProtocolsFolder: () -> Void
     let onOpenSettings: () -> Void
+    /// Toggles the floating notes panel. Always present, like `onOpenSettings`
+    /// — the panel is available whether or not a meeting is recording.
+    let onOpenNotes: () -> Void
     let onNameSpeakers: (() -> Void)?
     let onQuit: () -> Void
 
@@ -45,6 +48,7 @@ struct MenuBarView: View {
         Divider()
 
         protocolActions
+        notesButton
 
         Divider()
 
@@ -199,6 +203,22 @@ struct MenuBarView: View {
         } label: {
             Label("Open Transcripts Folder", systemImage: "folder")
         }
+    }
+
+    /// Toggles the floating notes panel. No status shown here — a menu carries
+    /// actions, not state, so whether the panel is currently open is legible
+    /// only from the panel itself.
+    private var notesButton: some View {
+        Button {
+            onOpenNotes()
+        } label: {
+            Label("Notes", systemImage: "note.text")
+        }
+        // ⌥⌘N, not ⌘N: "Name Speakers..." above already claims ⌘N whenever a
+        // naming job is pending, and two controls claiming one key equivalent
+        // is unspecified behaviour in SwiftUI. This also matches the global
+        // hotkey, so the panel answers to one chord wherever you press it.
+        .keyboardShortcut("n", modifiers: [.option, .command])
     }
 
     private var settingsButton: some View {

@@ -115,6 +115,9 @@ final class PipelineController {
             speakerMatcherFactory: { SpeakerMatcher() },
             vadConfig: settings.vadEnabled ? VADConfig(threshold: settings.vadThreshold) : nil,
             recognitionStatsLog: RecognitionStatsLog(),
+            // A closure, not `settings.notesFeedToProtocol` read once: the queue
+            // outlives a settings change, and the flag is read per job.
+            notesFeedToProtocol: { [settings] in settings.notesFeedToProtocol },
             stageTimingLog: StageTimingLog(),
             terminalJobStore: terminalJobStore,
         )

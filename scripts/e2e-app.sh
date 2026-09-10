@@ -39,6 +39,7 @@ REDEPLOY_ONLY=false      # rebuild + redeploy the canonical (non-fault) bundle a
 NAMING_CONFIRM=false     # drive the speaker-naming CONFIRM path end-to-end via POST /v1/jobs/<id>/naming (see run_naming_confirm)
 NAMING_ESCAPE=false      # press a real Escape on the naming dialog + assert it dismisses without resolving (issue #577)
 ECHO_BLEED=false         # feed a synthesised affected + clean pair through /v1/jobs and assert the echo verdict (see run_echo_bleed)
+NOTES_INVISIBLE=false    # open the notes panel via the real global hotkey and assert its window is excluded from screen capture (see run_notes_invisible)
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -58,6 +59,7 @@ while [ $# -gt 0 ]; do
         --naming-confirm)   NAMING_CONFIRM=true ;;
         --naming-escape)    NAMING_ESCAPE=true ;;
         --echo-bleed)       ECHO_BLEED=true ;;
+        --notes-invisible)  NOTES_INVISIBLE=true ;;
         -h|--help)
             cat <<'HELP'
 Usage: e2e-app.sh [--no-build] [--keep-app] [--two-meetings] [--record-only]
@@ -143,6 +145,20 @@ Usage: e2e-app.sh [--no-build] [--keep-app] [--two-meetings] [--record-only]
                        Leaves two finished jobs and a recognition-log row behind
                        (it skips their naming so nothing stays parked); it never
                        enrolls a voice, so speakers.json is untouched.
+  --notes-invisible    Assert the notes panel is excluded from screen capture.
+                       Posts the real physical ⌥⌘N global hotkey via System
+                       Events (same TCC prerequisites as --naming-escape:
+                       Automation + Accessibility) to open the panel — the only
+                       way to open it from outside the process, since it is
+                       deliberately absent from every UI-automation allowlist
+                       (it holds meeting content). Reads its `windowNumber` off
+                       GET /state, then asserts `/usr/sbin/screencapture -x -o -l
+                       <windowNumber>` exits NON-ZERO for the notes window while
+                       the same command exits 0 for the Settings window — the
+                       one check that proves the real WindowServer property
+                       rather than trusting our own `excludedFromCapture` flag.
+                       Standalone lane. Skips (not fails) on a host missing the
+                       TCC grants, same as --naming-escape.
   --fixture            Audio fixture for meeting-simulator. Default: two_speakers_de.wav.
 HELP
             exit 0
@@ -200,6 +216,16 @@ if [ "$ECHO_BLEED" = true ] && { [ "$NAMING_CONFIRM" = true ] || [ "$NAMING_ESCA
     || [ "$MIC_DEVICE_CHANGE" = true ] || [ "$CRASH_RECOVERY" = true ] || [ "$REDEPLOY_ONLY" = true ] \
     || [ "$TWO_MEETINGS" = true ] || [ -n "$SIMULATOR_FIXTURE" ]; }; then
     echo "Error: --echo-bleed is a standalone lane; incompatible with the other lane flags and --fixture" >&2
+    exit 2
+fi
+# --notes-invisible drives its own window (no meeting, no recording) via a
+# posted global hotkey, and shares nothing with the other lanes.
+if [ "$NOTES_INVISIBLE" = true ] && { [ "$NAMING_CONFIRM" = true ] || [ "$NAMING_ESCAPE" = true ] \
+    || [ "$RECORD_ONLY" = true ] || [ "$REIMPORT_RECORDED" = true ] || [ "$REIMPORT_LATEST" = true ] \
+    || [ "$MIC_DEVICE_CHANGE" = true ] || [ "$CRASH_RECOVERY" = true ] || [ "$REDEPLOY_ONLY" = true ] \
+    || [ "$TWO_MEETINGS" = true ] || [ "$MIC_ONLY" = true ] || [ "$ECHO_BLEED" = true ] \
+    || [ -n "$SIMULATOR_FIXTURE" ]; }; then
+    echo "Error: --notes-invisible is a standalone lane; incompatible with the other lane flags and --fixture" >&2
     exit 2
 fi
 
@@ -1728,6 +1754,122 @@ run_naming_escape() {
     log "$label: PASS"
 }
 
+run_notes_invisible() {
+    local label="[notes-invisible]"
+
+    # Same TCC preflight as --naming-escape: posting a synthetic keystroke
+    # (any keystroke, to any process) needs both Automation (control System
+    # Events) and Accessibility (post keys) grants on the shell running this
+    # lane. See that lane's comment for why this is a probe-with-timeout
+    # rather than a permission read: a missing Automation grant makes
+    # osascript hang for its default 120 s instead of failing loudly.
+    local probe
+    probe="$(osascript -e 'tell application "System Events" to key code 53' 2>&1)" || true
+    case "$probe" in
+        *"not allowed"*|*"assistive"*|*"1002"*)
+            log "$label: SKIP — this host may drive System Events but not post keystrokes."
+            log "$label: cause: $probe"
+            log "$label: fix: System Settings → Privacy & Security → Accessibility, enable the entry for the shell that runs this lane."
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+                {
+                    echo "### notes-invisible lane skipped"
+                    echo
+                    echo "This host has Automation but is missing the **Accessibility** grant, so the notes panel could not be opened via the real hotkey."
+                } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            return 0 ;;
+    esac
+    local tcc_timeout="${E2E_TCC_PROMPT_TIMEOUT:-10}"
+    probe="$(osascript -e "with timeout of ${tcc_timeout} seconds" \
+        -e 'tell application "System Events" to get name of first process whose frontmost is true' \
+        -e 'end timeout' 2>&1)" || true
+    case "$probe" in
+        *"timed out"*|*"-1712"*|*"not authori"*|*"-1743"*)
+            log "$label: SKIP — this host cannot drive System Events (probe window ${tcc_timeout}s)."
+            log "$label: cause: $probe"
+            log "$label: fix: System Settings → Privacy & Security → Automation, allow the runner's shell to control System Events."
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+                {
+                    echo "### notes-invisible lane skipped"
+                    echo
+                    echo "This host is missing the **Automation** grant, so the notes panel could not be opened via the real hotkey."
+                } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            return 0 ;;
+    esac
+
+    # Post the physical ⌥⌘N global hotkey. Deliberately NOT targeted at a
+    # specific process (unlike --naming-escape's Escape): a global hotkey is
+    # registered via Carbon's RegisterEventHotKey, which the OS delivers
+    # regardless of which app is frontmost — fronting the app first would
+    # test a narrower, unrealistic condition than the feature actually
+    # provides. Key code 45 is 'N' (GlobalHotkey.virtualKeyCodeN).
+    local key_err
+    key_err="$(osascript -e 'tell application "System Events" to key code 45 using {command down, option down}' 2>&1)" \
+        || fail "$label: could not post the notes hotkey (⌥⌘N): $key_err"
+
+    _notes_window_visible() {
+        [ "$(rpc /state | jq -r '[.windows[] | select(.id == "notes") | .isVisible] | first // false')" = "true" ]
+    }
+    poll_until 15 1 _notes_window_visible \
+        || fail "$label: notes panel never became visible after posting ⌥⌘N (windows=$(rpc /state | jq -c '[.windows[]|{id,isVisible}]'))"
+    log "$label: notes panel open"
+
+    local notes_number notes_excluded
+    notes_number="$(rpc /state | jq -r '[.windows[] | select(.id == "notes") | .windowNumber] | first // empty')"
+    [ -n "$notes_number" ] || fail "$label: /state had no windowNumber for the notes window"
+    notes_excluded="$(rpc /state | jq -r '[.windows[] | select(.id == "notes") | .excludedFromCapture] | first // empty')"
+    [ "$notes_excluded" = "true" ] \
+        || fail "$label: /state.excludedFromCapture was not true for the notes window (got '$notes_excluded')"
+    log "$label: notes window=$notes_number, /state reports excludedFromCapture=true"
+
+    # Control: the Settings window is an ordinary window and must capture
+    # fine. Opens it if it isn't already, via the same RPC action the menu's
+    # Settings item hits, so this lane never has to drive real UI for it.
+    local settings_number
+    settings_number="$(rpc /state | jq -r '[.windows[] | select(.id == "settings") | .windowNumber] | first // empty')"
+    if [ -z "$settings_number" ]; then
+        curl --silent --show-error --max-time 10 -X POST \
+            --header "Authorization: Bearer $RPC_TOKEN" --header "Content-Length: 0" \
+            "$RPC_BASE/action/openSettings" >/dev/null 2>&1 || true
+        _settings_window_visible() {
+            [ "$(rpc /state | jq -r '[.windows[] | select(.id == "settings") | .isVisible] | first // false')" = "true" ]
+        }
+        poll_until 15 1 _settings_window_visible \
+            || fail "$label: settings window never opened for the capture-control comparison"
+        settings_number="$(rpc /state | jq -r '[.windows[] | select(.id == "settings") | .windowNumber] | first // empty')"
+    fi
+    [ -n "$settings_number" ] || fail "$label: /state had no windowNumber for the settings window"
+
+    # The real check: exit code of a real capture attempt, not the app's own
+    # projection of `sharingType`. Measured on macOS 26.5: a `sharingType =
+    # .none` window fails `screencapture -l` with "could not create image
+    # from window" (non-zero); an ordinary window captures fine (zero).
+    # PID-suffixed rather than mktemp: screencapture writes the file itself
+    # (at whatever exit code), so nothing here needs a pre-created inode.
+    local notes_capture settings_capture notes_rc settings_rc
+    notes_capture="/tmp/e2e-notes-invisible-notes-$$.png"
+    settings_capture="/tmp/e2e-notes-invisible-settings-$$.png"
+
+    /usr/sbin/screencapture -x -o -l "$notes_number" "$notes_capture" >/dev/null 2>&1
+    notes_rc=$?
+    /usr/sbin/screencapture -x -o -l "$settings_number" "$settings_capture" >/dev/null 2>&1
+    settings_rc=$?
+    rm -f "$notes_capture" "$settings_capture"
+
+    [ "$notes_rc" -ne 0 ] \
+        || fail "$label: screencapture -l $notes_number exited 0 — the notes window IS capturable (sharingType != .none)"
+    log "$label: screencapture -l $notes_number exited $notes_rc (non-zero, as expected — window excluded)"
+    [ "$settings_rc" -eq 0 ] \
+        || fail "$label: screencapture -l $settings_number (control, settings window) exited $settings_rc, expected 0"
+    log "$label: screencapture -l $settings_number exited 0 (control captured fine)"
+
+    # Close the panel again via the same hotkey (it toggles) so the run
+    # leaves nothing floating on screen.
+    osascript -e 'tell application "System Events" to key code 45 using {command down, option down}' >/dev/null 2>&1 || true
+    log "$label: PASS"
+}
+
 run_naming_confirm() {
     local label="[naming-confirm]"
     [ -f "$DEFAULT_FIXTURE" ] || fail "$label: 2-speaker fixture not found: $DEFAULT_FIXTURE"
@@ -2271,6 +2413,8 @@ elif [ "$NAMING_CONFIRM" = true ]; then
     run_naming_confirm
 elif [ "$ECHO_BLEED" = true ]; then
     run_echo_bleed
+elif [ "$NOTES_INVISIBLE" = true ]; then
+    run_notes_invisible
 elif [ "$TWO_MEETINGS" = true ]; then
     # Back-to-back: each meeting is started explicitly via POST /v1/record and
     # only returns once its own job reached done, so there is no WatchLoop

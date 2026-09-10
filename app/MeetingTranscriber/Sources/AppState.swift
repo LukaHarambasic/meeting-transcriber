@@ -114,6 +114,16 @@ final class AppState {
     /// installation to it.
     let liveTranscription: LiveTranscriptionCoordinator
 
+    /// The notes panel's text, target and visibility. One instance for the
+    /// process: the panel, the ⌥⌘N hotkey, the menu item and the automation API
+    /// all act on this, and a second instance would mean two buffers writing
+    /// the same file.
+    ///
+    /// Its store is shared with `watching`, which reads a finished recording's
+    /// notes on the enqueue path — the same object, so a note typed a moment
+    /// before Stop is on disk where the enqueue looks for it.
+    let notes: NotesController
+
     /// Routes the machine's sleep/wake notifications into the recording
     /// lifecycle: finalize-and-enqueue before sleep, re-mix-and-enqueue after
     /// wake. Held for the process lifetime, like the other permanent observer
@@ -162,6 +172,14 @@ final class AppState {
 
     // MARK: - Init
 
+    // 61 lines against a 60-line cap, and the three over are the notes
+    // composition: the shared store, the closure that hands a finished
+    // recording's notes to the enqueue path, and the controller. They cannot
+    // collapse further, because `WatchingController` needs the take-notes
+    // closure at construction while `NotesController` needs the controller that
+    // construction produces, so the store has to be named between them. Remove
+    // this suppression if that ordering ever stops being true.
+    // swiftlint:disable:next function_body_length
     init(
         settings: AppSettings = AppState.makeDefaultSettings(),
         notifier: any AppNotifying = SilentNotifier(),
@@ -200,6 +218,11 @@ final class AppState {
             verboseDiagnostics: { [settings] in settings.verboseDiagnostics },
             warmupQueue: warmupQueue,
         )
+        // One store, two readers: the panel writes through it on every
+        // keystroke, and the enqueue path below takes a finished recording's
+        // notes out of it. Two instances would mean the recording looked for
+        // notes in a file the panel never wrote.
+        let notesStore = Self.makeNotesStore(settings: settings)
         self.watching = WatchingController(
             settings: settings,
             notifier: notifier,
@@ -207,7 +230,9 @@ final class AppState {
             channelHealth: channelHealth,
             liveTranscription: liveTranscription,
             askDeliverability: askDeliverability,
+            takeNotes: Self.makeTakeNotes(store: notesStore),
         )
+        self.notes = Self.makeNotesController(store: notesStore, watching: watching)
 
         #if !APPSTORE
             // Not trailing-closure: `isEnabled` is the first param (the other two
@@ -403,6 +428,14 @@ final class AppState {
                 transcribe: transcribe,
                 recordStatus: record.status,
                 recordControl: record.control,
+                // Through the controller, not straight to the store: it
+                // re-resolves the target first, so a driver that starts a
+                // recording and immediately posts a note reaches the meeting
+                // rather than the day's scratch note.
+                // swiftlint:disable:next trailing_closure
+                appendNote: { [weak self] text in
+                    self?.notes.appendFromAutomation(text)
+                },
             )
         }
     #endif

@@ -334,14 +334,21 @@ class MockProtocolGen: ProtocolGenerating {
     // swiftlint:disable:next discouraged_optional_boolean
     var capturedDiarized: Bool?
     var capturedMeetingStartTime: Date?
+    /// What the pipeline handed over as meeting notes. Nil-vs-empty matters
+    /// here: nil means the notes never reached the generator at all, which is
+    /// the wiring failure the composition tests exist to catch.
+    var capturedNotes: String?
     var shouldThrow = false
 
-    func generate(transcript: String, title: String, diarized: Bool, meetingStartTime: Date?) throws -> String {
+    func generate(
+        transcript: String, title: String, diarized: Bool, meetingStartTime: Date?, notes: String?,
+    ) throws -> String {
         generateCalled = true
         capturedTranscript = transcript
         capturedTitle = title
         capturedDiarized = diarized
         capturedMeetingStartTime = meetingStartTime
+        capturedNotes = notes
         if shouldThrow {
             throw NSError(
                 domain: "MockProtocolGen",
@@ -364,7 +371,9 @@ class MockProtocolGen: ProtocolGenerating {
 /// Test-only convenience for generators whose meeting time is irrelevant to a test.
 extension ProtocolGenerating {
     func generate(transcript: String, title: String, diarized: Bool) async throws -> String {
-        try await generate(transcript: transcript, title: title, diarized: diarized, meetingStartTime: nil)
+        try await generate(
+            transcript: transcript, title: title, diarized: diarized, meetingStartTime: nil, notes: nil,
+        )
     }
 }
 

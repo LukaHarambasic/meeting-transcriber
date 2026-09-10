@@ -5,7 +5,16 @@ private let logger = Logger(subsystem: AppPaths.logSubsystem, category: "Protoco
 
 /// Abstraction for protocol generation, enabling mock injection in tests.
 protocol ProtocolGenerating {
-    func generate(transcript: String, title: String, diarized: Bool, meetingStartTime: Date?) async throws -> String
+    /// `notes` is the markdown the user typed during the meeting, handed over as
+    /// authoritative context (correct spellings, decisions, what they flagged as
+    /// a task). Part of the requirement rather than a defaulted convenience for
+    /// the same reason as `AppNotifying.notify`'s urgency: a conformer that
+    /// ignores it has to say so. Nil when there are none or when the user turned
+    /// the feed off; the verbatim `## Notes` section in the `.md` does not
+    /// depend on this and is written either way.
+    func generate(
+        transcript: String, title: String, diarized: Bool, meetingStartTime: Date?, notes: String?,
+    ) async throws -> String
 }
 
 /// Shared protocol utilities: prompts, file operations, and error types.
@@ -122,11 +131,12 @@ enum ProtocolGenerator {
         diarized: Bool,
         language: String,
         meetingStartTime: Date?,
+        notes: String? = nil,
         promptURL: URL = AppPaths.customPromptFile,
         timeZone: TimeZone = .autoupdatingCurrent,
     ) -> String {
         let metadata = meetingStartTime.map { meetingMetadata(for: $0, timeZone: timeZone) }
-        var prompt = meetingTimeContext(metadata: metadata) + applyVariables(
+        var prompt = meetingTimeContext(metadata: metadata) + notesContext(notes: notes) + applyVariables(
             loadPrompt(from: promptURL),
             language: language,
             metadata: metadata,
@@ -158,6 +168,27 @@ enum ProtocolGenerator {
             "The date and time above are authoritative. Interpret relative time expressions",
             "in the transcript relative to this meeting date. Do not rely on the model's",
             "assumed current date.",
+        ].joined(separator: "\n") + "\n\n"
+    }
+
+    /// Context block for the notes the user typed live during the meeting.
+    /// Empty when there are none (or the feed is switched off), so a prompt
+    /// with no notes is byte-identical to the pre-notes prompt.
+    ///
+    /// Told explicitly that the notes outrank the transcript, not just handed
+    /// over as extra context: the transcript is machine-transcribed speech and
+    /// routinely mishears a name, a number or a decision that the user's own
+    /// notes state plainly.
+    private static func notesContext(notes: String?) -> String {
+        guard let notes else { return "" }
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNotes.isEmpty else { return "" }
+        return [
+            "The user's own notes, typed live during the meeting:",
+            trimmedNotes,
+            "These notes are authoritative over the transcript for names, decisions and",
+            "tasks: the transcript is machine-transcribed speech and can mishear a name",
+            "or a number the notes state plainly.",
         ].joined(separator: "\n") + "\n\n"
     }
 

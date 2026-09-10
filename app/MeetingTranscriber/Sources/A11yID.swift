@@ -78,4 +78,18 @@ enum A11yID {
 
     // Live captions overlay.
     static let liveCaptionBackend = "liveCaptionBackend"
+
+    // Notes panel. The editor is findable so a ViewInspector test can pin the
+    // binding write-back; neither it nor the panel's window may ever join the
+    // `/ui/type`, `/ui/tree` or `/screenshot` allowlists, because the panel
+    // holds meeting content (same rule as the speaker-naming window).
+    static let notesEditor = "notesEditor"
+    static let notesTargetLabel = "notesTargetLabel"
+    static let notesTimestampButton = "notesTimestampButton"
+
+    // Settings → Notes tab. Ordinary Settings-window controls (unlike the
+    // panel above), so no allowlist restriction applies to these.
+    static let notesSection = "notesSection"
+    static let notesHotkeyToggle = "notesHotkeyToggle"
+    static let notesFeedToProtocolToggle = "notesFeedToProtocolToggle"
 }

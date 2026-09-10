@@ -85,6 +85,10 @@
         let transcribe: (URL, Double) async -> BlockingTranscribeResult // POST /v1/transcribe
         let recordStatus: () -> RecordStatusDTO // GET /v1/record
         let recordControl: (RecordActionPayload) async -> RecordControlOutcome // POST /v1/record
+        /// `POST /v1/notes`. The only way to put text in a note without a human
+        /// at the keyboard: the panel itself can never join the `/ui/type`
+        /// allowlist, because it holds meeting content.
+        let appendNote: (String) -> Void
         var idempotency = IdempotencyStore() // Idempotency-Key -> job IDs; internal for the +V1 extension
         private let expectedAuth: String
         private var listener: NWListener?
@@ -112,6 +116,7 @@
             transcribe: @escaping (URL, Double) async -> BlockingTranscribeResult = { _, _ in .noFile },
             recordStatus: @escaping () -> RecordStatusDTO = { .notRecording },
             recordControl: @escaping (RecordActionPayload) async -> RecordControlOutcome = { _ in .failed },
+            appendNote: @escaping (String) -> Void = { _ in },
         ) {
             self.port = NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port.any
             self.expectedAuth = "Bearer \(token)"
@@ -128,6 +133,7 @@
             self.transcribe = transcribe
             self.recordStatus = recordStatus
             self.recordControl = recordControl
+            self.appendNote = appendNote
         }
 
         /// Generate a 32-byte hex token, persist atomically with mode 0600, return it.
@@ -362,6 +368,21 @@
                 Self.closeSettings()
                 return HTTPResponse.ok()
 
+            // Debug counterparts to the ⌥⌘N hotkey and the menu row. They exist
+            // so a driver can put the notes panel on screen without posting a
+            // synthetic keystroke: the `--naming-escape` lane needs a physical
+            // key because Escape provably resists injection, but nothing about
+            // opening this panel does, and requiring System Events here would
+            // make the capture-exclusion check depend on an Accessibility grant
+            // it has no reason to need.
+            case ("POST", "/action/openNotes"):
+                Self.openNotes()
+                return HTTPResponse.ok()
+
+            case ("POST", "/action/closeNotes"):
+                Self.closeNotes()
+                return HTTPResponse.ok()
+
             case ("POST", "/action/skipNaming"):
                 // Skips ALL pending speaker-naming jobs in one shot — driver
                 // scripts (e2e-app.sh) just want to drain the queue without
@@ -502,6 +523,20 @@
         @MainActor
         static func closeSettings() {
             NotificationCenter.default.post(name: .closeSettings, object: nil)
+        }
+
+        /// Show the notes panel, the same way the hotkey and the menu row do:
+        /// through `NotesController.isVisible`, which the scene observes. Posted
+        /// as a notification rather than reaching the panel directly so there is
+        /// still exactly one code path that puts it on screen.
+        @MainActor
+        static func openNotes() {
+            NotificationCenter.default.post(name: .showNotes, object: nil)
+        }
+
+        @MainActor
+        static func closeNotes() {
+            NotificationCenter.default.post(name: .closeNotes, object: nil)
         }
     }
 
