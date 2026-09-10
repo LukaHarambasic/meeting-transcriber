@@ -199,7 +199,17 @@ Use the `/git-workflow` skill. Commit proactively after every logical unit of wo
   conversion into a `+`-concatenated multi-line string literal (`"… \(Int(x / 60)) …" + "…"`) cost
   1.8 s in one function. Fix by hoisting to explicitly-typed locals (`let n: Int = …`) and
   concatenating those, not by disabling the flag. Same family as the SwiftUI `body` splits already
-  documented across `MenuBarView` / `AppState` — it is not a SwiftUI-only trap.
+  documented across `MenuBarView` / `AppState` — it is not a SwiftUI-only trap. Two more shapes,
+  both measured: inline dependency closures in `AppState.init` (358 ms — hoist each into a
+  `private static func make…()` with a declared return type), and adding `.onChange` modifiers to
+  the app's scene body (321 ms). For the latter, **extracting them into a `ViewModifier` is not
+  enough on its own** (313 ms) — constructing a multi-argument modifier inline is itself the cost,
+  so also build it in an explicitly-typed computed property and leave only `.modifier(prop)` in the
+  body. Observable reads still happen during body evaluation, so tracking is unaffected.
+- Adding a field with a default to a `Codable` DTO: use `var`, never `let`. A `let` with an
+  initializer is silently excluded from the synthesized `Decodable`, which is an ERROR here because
+  warnings are errors ("immutable property will not be decoded…"). Hit on `RPCStateSnapshot.WindowInfo`.
+  The other half of the rule is already above: a field added after v1 must decode as optional.
 - Protocol output language configurable via `AppSettings.protocolLanguage` (default: English —
   this is a personal variant of the upstream project, whose owner's meetings are always English;
   upstream defaults to German. `AppSettings.whisperLanguage` likewise defaults to `en` here)
