@@ -28,7 +28,7 @@ final class WatchLoopNotesTests: XCTestCase {
             noMic: true,
             takeNotes: notesProvider,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 
@@ -68,7 +68,7 @@ final class WatchLoopNotesTests: XCTestCase {
             noMic: true,
             takeNotes: notesProvider,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 

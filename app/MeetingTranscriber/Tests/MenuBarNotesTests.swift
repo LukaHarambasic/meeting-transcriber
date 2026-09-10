@@ -12,18 +12,15 @@ final class MenuBarNotesTests: XCTestCase {
             status: nil,
             issue: nil,
             pipelineQueue: PipelineQueue(),
-            updateChecker: nil,
             onRecordMeeting: {},
             manualRecordingPendingOrActive: false,
             onStopManualRecording: nil,
             onOpenLastProtocol: {},
-            onOpenProtocol: { _ in },
             onOpenProtocolsFolder: {},
             onOpenSettings: {},
             onOpenNotes: onOpenNotes,
             onNameSpeakers: nil,
-            onDismissJob: { _ in },
-            onQuit: {},
+            onQuit: {}, // swiftlint:disable:this trailing_closure
         )
     }
 
