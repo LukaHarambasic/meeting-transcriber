@@ -26,7 +26,7 @@ final class WatchLoopMeetingStartTimeTests: XCTestCase {
             maxDuration: 10,
             noMic: true,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 

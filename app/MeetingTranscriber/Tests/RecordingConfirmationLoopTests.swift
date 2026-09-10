@@ -55,7 +55,7 @@ final class RecordingConfirmationLoopTests: XCTestCase {
             // swiftlint:disable:next trailing_closure
             askDeliverability: { deliverability },
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
         return (loop, recorder)

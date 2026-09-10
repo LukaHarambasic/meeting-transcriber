@@ -39,7 +39,7 @@ final class RecordingSleepGuardTests: XCTestCase {
             sleepBlocker: blocker,
             salvageInterrupted: salvage,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
         return loop
@@ -93,7 +93,7 @@ final class RecordingSleepGuardTests: XCTestCase {
     func testRefusedStartTakesNoAssertion() async {
         let blocker = SpySleepBlocker()
         let loop = makeLoop(recorder: workingRecorder(), blocker: blocker)
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .denied, microphone: .healthy)
         }
 

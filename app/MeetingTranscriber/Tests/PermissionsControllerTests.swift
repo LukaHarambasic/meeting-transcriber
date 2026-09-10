@@ -8,8 +8,8 @@ import XCTest
 /// `AppState`, so they don't pay the AppState init cost (pipeline queue,
 /// channel-health monitors, live-transcription prewarm, and — in non-AppStore
 /// builds — the persistent-log-streamer subprocess). The injected `probe` seam
-/// also lets the debounce logic be tested without the real ~500 ms `runLive()`
-/// TCC probe, which was impossible while the call was hard-wired into AppState.
+/// also lets the debounce logic be tested without touching real TCC, which was
+/// impossible while the call was hard-wired into AppState.
 @MainActor
 final class PermissionsControllerTests: XCTestCase {
     // MARK: - handle: notification behaviour (moved from AppStateTests)

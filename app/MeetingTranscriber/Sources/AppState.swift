@@ -205,7 +205,6 @@ final class AppState {
             notifier: notifier,
             pipeline: pipeline,
             channelHealth: channelHealth,
-            permissions: permissions,
             liveTranscription: liveTranscription,
             askDeliverability: askDeliverability,
         )

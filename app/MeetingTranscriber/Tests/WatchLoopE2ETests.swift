@@ -76,7 +76,7 @@ final class WatchLoopE2ETests: XCTestCase { // swiftlint:disable:this balanced_x
             maxDuration: 10,
             noMic: false,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
         return loop

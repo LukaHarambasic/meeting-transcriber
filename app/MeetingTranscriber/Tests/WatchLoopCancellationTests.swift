@@ -31,7 +31,7 @@ final class WatchLoopCancellationTests: XCTestCase {
             maxDuration: 100,
             noMic: true,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 

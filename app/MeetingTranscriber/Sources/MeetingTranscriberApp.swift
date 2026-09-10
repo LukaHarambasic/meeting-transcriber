@@ -147,8 +147,11 @@ struct MeetingTranscriberApp: App {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 // Re-check permissions when the user returns to the app (e.g. from System
-                // Settings after toggling a permission). Debounced so rapid Cmd-Tab cycles
-                // don't repeatedly churn the mic HAL via the 500 ms probe.
+                // Settings after toggling a permission). Opening the menu bar dropdown
+                // activates the app too, so this fires constantly — which is exactly why
+                // the check behind it must stay device-free (`PermissionHealthCheck.runPassive`).
+                // The debounce is a cheapness measure, never the thing keeping the audio
+                // device shut.
                 Task { @MainActor in
                     await appState.permissions.check(minimumInterval: 3)
                 }

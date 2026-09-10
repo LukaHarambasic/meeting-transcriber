@@ -395,46 +395,6 @@ final class PermissionHealthCheckTests: XCTestCase {
         }
         return buffer
     }
-
-    // MARK: - The background check must not open the microphone
-
-    /// `.trustSystemVerdict` must resolve an authorized grant without probing.
-    ///
-    /// Behavioural half of the guard: it pins the decision, and it runs in
-    /// microseconds. It cannot prove no audio device was touched, because
-    /// `probeMicrophone` reaches real hardware and has no seam; the source-level
-    /// test below covers the wiring instead.
-    func testTrustSystemVerdictResolvesAuthorizedWithoutProbing() async {
-        let status = await PermissionHealthCheck.checkMicrophoneLive(policy: .trustSystemVerdict)
-        // On a machine where the grant is denied this is `.denied`, which is
-        // still a not-probed answer. Either way it must never be `.broken`,
-        // since `.broken` is only reachable by actually probing.
-        XCTAssertNotEqual(
-            status, .broken,
-            "trusting the system verdict cannot produce .broken; that verdict requires opening the mic",
-        )
-    }
-
-    /// `PermissionsController`'s probe must keep passing `.trustSystemVerdict`.
-    ///
-    /// A source-level assertion, deliberately, and the reasoning is worth
-    /// keeping: the wiring is a DEFAULT ARGUMENT on that controller's `init`, so
-    /// there is nothing to observe from a test that does not call it, and
-    /// calling it runs the real check against real hardware. Asserting on the
-    /// source is weak, but it catches the realistic regression, which is someone
-    /// simplifying the argument away and silently restoring a bug that corrupts
-    /// the user's Bluetooth audio every time the app is activated.
-    func testPermissionsControllerDoesNotProbeTheMicrophone() throws {
-        let source = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // Tests/
-            .deletingLastPathComponent() // MeetingTranscriber/
-            .appendingPathComponent("Sources/PermissionsController.swift")
-        let text = try String(contentsOf: source, encoding: .utf8)
-        XCTAssertTrue(
-            text.contains("micProbe: .trustSystemVerdict"),
-            "PermissionsController runs at launch and on every activation; its probe must not open the mic",
-        )
-    }
 }
 
 /// Thread-safe incrementing counter for sequenced fake snapshots.

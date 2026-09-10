@@ -23,7 +23,7 @@ final class WatchLoopMonitorTests: XCTestCase {
             sleepProvider: { await clock.sleep(for: $0) },
             pidAliveCheck: { _ in false }, // simulated process already exited
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 
@@ -50,7 +50,7 @@ final class WatchLoopMonitorTests: XCTestCase {
             sleepProvider: { await clock.sleep(for: $0) },
             pidAliveCheck: { _ in true }, // process never dies
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 

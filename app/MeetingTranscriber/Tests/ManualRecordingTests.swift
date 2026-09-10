@@ -17,7 +17,7 @@ final class ManualRecordingTests: XCTestCase {
             maxDuration: 10,
             noMic: noMic,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
         return (loop, mock)
@@ -216,7 +216,7 @@ final class ManualRecordingTests: XCTestCase {
 
     func testMicrophoneRecordingIsRefusedWithoutTheMicrophoneGrant() async {
         let (loop, mock) = makeLoop()
-        loop.permissionChecker = { HealthCheckResult(screenRecording: .healthy, microphone: .denied) }
+        loop.permissionChecker = { _ in HealthCheckResult(screenRecording: .healthy, microphone: .denied) }
 
         do {
             try await loop.startMicrophoneRecording()
@@ -231,7 +231,7 @@ final class ManualRecordingTests: XCTestCase {
         // The other half of the gate change: no tap is opened, so the grant
         // that only ever stood in for the tap must not refuse this.
         let (loop, _) = makeLoop()
-        loop.permissionChecker = { HealthCheckResult(screenRecording: .denied, microphone: .healthy) }
+        loop.permissionChecker = { _ in HealthCheckResult(screenRecording: .denied, microphone: .healthy) }
 
         try await loop.startMicrophoneRecording()
         defer { loop.stop() }

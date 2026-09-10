@@ -122,7 +122,7 @@ final class RecordOnlyE2ETests: XCTestCase { // swiftlint:disable:this balanced_
             recordOnlyDestination: { .unscoped(outputDir) },
             notifier: notifier,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
         return loop

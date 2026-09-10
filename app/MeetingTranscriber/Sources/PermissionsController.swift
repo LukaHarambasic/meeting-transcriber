@@ -9,9 +9,14 @@ import Observation
 /// AppState god-class split). `AppState` exposes it as a sub-controller and
 /// composes its `health` into `currentBadge`.
 ///
-/// The `probe` seam lets tests exercise the debounce + notification logic
-/// without the real ~500 ms `PermissionHealthCheck.runLive()` TCC probe, which
-/// churns the audio HAL and was untestable while wired directly into AppState.
+/// Every caller of this controller is proactive (launch, app activation,
+/// `/state`), so its probe must be `PermissionHealthCheck.runPassive()`, which
+/// opens no audio device. Wiring the probing variant in here is what made
+/// opening the menu bar dropdown break the user's Bluetooth playback; the
+/// reasoning is written out on `runPassive` and is not a detail of this class.
+///
+/// The `probe` seam additionally lets tests exercise the debounce +
+/// notification logic without touching real TCC.
 @Observable
 @MainActor
 final class PermissionsController {
@@ -19,13 +24,13 @@ final class PermissionsController {
     /// permission-problem overlay and the `currentBadge` `.error` state.
     private(set) var health: HealthCheckResult?
 
-    /// Timestamp of the last completed `check()` run. Debounces the repeated
-    /// calls that `NSApplication.didBecomeActiveNotification` produces.
+    /// Timestamp of the last completed `check()` run. Used to debounce repeated
+    /// calls triggered by `NSApplication.didBecomeActiveNotification`, which
+    /// fires on every Cmd-Tab and every menu bar dropdown.
     ///
-    /// It no longer protects the audio HAL: this controller's probe does not
-    /// open the microphone at all (see `init`). Kept because the screen-recording
-    /// check and the notification dedup are still worth not re-running on every
-    /// Cmd-Tab.
+    /// This is a cheapness measure only. It was once the *mitigation* for the
+    /// mic probe churning the audio HAL, and it never worked as one: the probe
+    /// is gone from this path instead (see `PermissionHealthCheck.runPassive`).
     private(set) var lastCheckAt: Date?
 
     private let notifier: any AppNotifying
@@ -33,16 +38,7 @@ final class PermissionsController {
 
     init(
         notifier: any AppNotifying,
-        // `.trustSystemVerdict`, not the default `.probe`: this controller runs at
-        // launch and on every app activation, and opening the microphone there
-        // drags a Bluetooth headset out of A2DP into HFP, corrupting the user's
-        // playback until they reconnect it. A headset is usually the default
-        // input as well as the default output, so "just checking the mic" breaks
-        // the audio they are listening to. The debounce below predates this and
-        // only reduced how often it happened.
-        probe: @escaping () async -> HealthCheckResult = {
-            await PermissionHealthCheck.runLive(micProbe: .trustSystemVerdict)
-        },
+        probe: @escaping () async -> HealthCheckResult = { PermissionHealthCheck.runPassive() },
     ) {
         self.notifier = notifier
         self.probe = probe
@@ -72,8 +68,8 @@ final class PermissionsController {
     ///
     /// - Parameter minimumInterval: if non-nil, skip the run when the last completed check
     ///   happened less than `minimumInterval` seconds ago. The initial startup call passes
-    ///   `nil` so it always runs; the `didBecomeActive` handler passes a small value to
-    ///   avoid HAL churn on rapid re-activations.
+    ///   `nil` so it always runs; the `didBecomeActive` handler passes a small value so
+    ///   rapid re-activations don't repeat the work.
     func check(minimumInterval: TimeInterval? = nil) async {
         if let minimumInterval, let last = lastCheckAt,
            Date().timeIntervalSince(last) < minimumInterval {

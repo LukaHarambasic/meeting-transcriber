@@ -380,44 +380,32 @@ enum PermissionHealthCheck {
         return (snapshot(), elapsedMs)
     }
 
-    /// Whether a live check may open the microphone to verify that a granted
-    /// permission actually delivers audio.
+    /// The microphone verdict from the TCC authorization status alone, taking
+    /// `.authorized` at face value and opening no audio device.
     ///
-    /// Opening an input device is not free, and on Bluetooth it is destructive.
-    /// Measured on this machine: the launch check stopped the playstate on the
-    /// user's connected headset, brought its input up through a
-    /// `CADefaultDeviceAggregate`, and tore it down again over about 350 ms.
-    /// That drags the device out of A2DP into HFP and back, which audibly
-    /// corrupts playback and typically needs a manual reconnect. The harm is
-    /// worst exactly where it is least expected, because a headset is usually
-    /// the default INPUT as well as the default output.
-    ///
-    /// So the background paths (launch, and every `didBecomeActive`) trust the
-    /// system verdict, and the probe survives only where the mic is about to be
-    /// opened anyway: the pre-recording gate. `PermissionsController` already
-    /// debounced this to limit "HAL churn", but a debounce only changes how
-    /// often the damage happens, not whether it does.
-    enum MicrophoneProbePolicy {
-        /// Open the mic, so `.broken` (granted but not delivering) is detected.
-        case probe
-        /// Trust `AVCaptureDevice.authorizationStatus` alone, touching no audio
-        /// device. Cannot distinguish `.healthy` from `.broken`; that is
-        /// deliberate, and the pre-recording gate still can.
-        case trustSystemVerdict
+    /// Expressed as `checkMicrophone` with the probe assumed to succeed rather
+    /// than as a second mapping, so the two verdicts cannot drift apart when
+    /// the status mapping changes.
+    static func checkMicrophonePassive(authStatus: AVAuthorizationStatus) -> PermissionStatus {
+        checkMicrophone(authStatus: authStatus, probeSucceeds: true)
     }
 
-    static func checkMicrophoneLive(policy: MicrophoneProbePolicy = .probe) async -> PermissionStatus {
+    /// `checkMicrophonePassive` against the live TCC status. Opens nothing.
+    static func checkMicrophoneAuthorizationOnly() -> PermissionStatus {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        let r = checkMicrophonePassive(authStatus: status)
+        debugLog("checkMicrophoneAuthorizationOnly: authStatus=\(status.rawValue) probe=notRun → \(r)")
+        return r
+    }
+
+    /// The probing microphone check. **Opens the machine's input device**, so it
+    /// belongs only on a path where that device is about to be opened anyway.
+    /// See `runPassive` for why.
+    static func checkMicrophoneLive() async -> PermissionStatus {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         if status != .authorized {
             let r = checkMicrophone(authStatus: status, probeSucceeds: false)
             debugLog("checkMicrophoneLive: authStatus=\(status.rawValue) probe=skipped → \(r)")
-            return r
-        }
-        guard policy == .probe else {
-            // `probeSucceeds: true` is the honest reading of "TCC allows it and
-            // we deliberately did not verify", not an assumption that it works.
-            let r = checkMicrophone(authStatus: status, probeSucceeds: true)
-            debugLog("checkMicrophoneLive: authStatus=authorized probe=notAttempted → \(r)")
             return r
         }
         let probe = await probeMicrophone()
@@ -438,13 +426,53 @@ enum PermissionHealthCheck {
         )
     }
 
-    /// - Parameter micProbe: defaults to `.probe` so the pre-recording gate keeps
-    ///   verifying for real. Background callers must pass `.trustSystemVerdict`;
-    ///   see `MicrophoneProbePolicy` for why opening the mic is destructive there.
-    static func runLive(micProbe: MicrophoneProbePolicy = .probe) async -> HealthCheckResult {
+    /// Health for every *proactive* caller: launch, app activation, `/state`.
+    /// Touches no audio device.
+    ///
+    /// Opening an input is not a read-only act. On a Bluetooth headset it drags
+    /// the device out of A2DP into HFP and back, which audibly wrecks whatever
+    /// the user is listening to and usually needs a manual reconnect — and a
+    /// headset is normally the default *input* as well as the default output,
+    /// so a background "is the mic working?" check breaks the very audio it is
+    /// standing next to. This app ran the probe at launch and on every
+    /// `didBecomeActive`, and opening the menu bar dropdown activates the app,
+    /// so the damage landed every time the user so much as looked at the menu.
+    ///
+    /// Debouncing was not a fix and must not be reached for again: it changes
+    /// how *often* the device is opened, not whether it is, and on Bluetooth
+    /// once is enough. The separation has to be structural, which is what these
+    /// two entry points are.
+    ///
+    /// The cost is explicit and accepted: `.broken` (TCC says authorized, the
+    /// device delivers nothing) is unreachable from here, so it is detected
+    /// when a recording that opens the microphone starts rather than
+    /// proactively. What the user loses is a red badge appearing a few minutes
+    /// earlier; what they keep is working playback.
+    static func runPassive() -> HealthCheckResult {
+        report(screenRecording: checkScreenRecordingLive(), microphone: checkMicrophoneAuthorizationOnly())
+    }
+
+    /// Health for the gate a recording start passes through.
+    ///
+    /// Probes the microphone only when `source` actually opens it, so an
+    /// app-audio-only or system-only recording never touches the input device.
+    /// Where it does probe, the recorder opens the same device milliseconds
+    /// later, so the probe adds no transition the recording was not going to
+    /// cause anyway — which is the whole reason this is the one path allowed to
+    /// run it (see `runPassive`).
+    static func runForRecordingStart(source: RecordingSource) async -> HealthCheckResult {
         let sr = checkScreenRecordingLive()
-        let mic = await checkMicrophoneLive(policy: micProbe)
-        let result = overallHealth(screenRecording: sr, microphone: mic)
+        let mic = source.capturesMicrophone
+            ? await checkMicrophoneLive()
+            : checkMicrophoneAuthorizationOnly()
+        return report(screenRecording: sr, microphone: mic)
+    }
+
+    private static func report(
+        screenRecording: PermissionStatus,
+        microphone: PermissionStatus,
+    ) -> HealthCheckResult {
+        let result = overallHealth(screenRecording: screenRecording, microphone: microphone)
         if !result.isHealthy {
             logger.warning("Permission health check failed: \(result.logSummary, privacy: .public)")
         }

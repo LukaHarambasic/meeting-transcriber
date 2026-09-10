@@ -56,13 +56,13 @@ extension XCTestCase {
         }
     }
 
-    /// - Parameter permissionHealth: seeds the health the controller hands to
-    ///   each loop it builds. Pass one whenever a test asserts that a start
-    ///   *succeeds*: nil leaves it unprobed, and the loop then runs a live TCC
-    ///   check whose microphone arm opens the real input device. Under
-    ///   `swift test --parallel` that is several forked processes probing the
-    ///   HAL at once, and it intermittently comes back denied, which the start
-    ///   then correctly refuses.
+    /// - Parameter permissionHealth: the verdict the controller's permission
+    ///   gate returns for every source. Pass one whenever a test asserts that a
+    ///   start *succeeds*: nil falls through to the real TCC check, whose
+    ///   microphone arm opens the real input device for a source that captures
+    ///   the microphone. Under `swift test --parallel` that is several forked
+    ///   processes probing the HAL at once, and it intermittently comes back
+    ///   denied, which the start then correctly refuses.
     /// - Parameter makeRecorder: defaults to a `MockRecorder` carrying a mix
     ///   path, so a stop through it takes the success path. Nothing built here
     ///   touches real audio hardware, because `DualSourceRecorder` writes into
@@ -135,8 +135,6 @@ extension XCTestCase {
             debounceSeconds: { 0 },
             indicatorEnabled: { false },
         )
-        let permissions = PermissionsController(notifier: notifier)
-        if let permissionHealth { permissions.handle(permissionHealth) }
         let liveTranscription = LiveTranscriptionCoordinator(
             captions: LiveCaptionsState(),
             liveEnabled: { false },
@@ -148,10 +146,13 @@ extension XCTestCase {
             notifier: notifier,
             pipeline: pipeline,
             channelHealth: channelHealth,
-            permissions: permissions,
             liveTranscription: liveTranscription,
             ensureMicAccess: ensureMicAccess,
             requestScreenRecording: requestScreenRecording,
+            permissionChecker: { source in
+                if let permissionHealth { return permissionHealth }
+                return await PermissionHealthCheck.runForRecordingStart(source: source)
+            },
             startJoinTimeout: startJoinTimeout,
             makeRecorder: makeRecorder,
             makeSleepBlocker: makeSleepBlocker,

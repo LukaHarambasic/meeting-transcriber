@@ -226,7 +226,7 @@ func makeTestWatchLoop(
         recordOnlyDestination: { .unscoped(recordOnlyOutputDir()) },
         notifier: notifier,
     )
-    loop.permissionChecker = { .allHealthy }
+    loop.permissionChecker = { _ in .allHealthy }
     return (loop, recorder)
 }
 

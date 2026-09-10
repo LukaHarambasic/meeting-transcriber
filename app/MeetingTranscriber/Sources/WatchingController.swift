@@ -12,8 +12,8 @@ import Observation
 /// god-class split). Unlike the earlier leaf controllers, watching is a hub: it
 /// reaches across the already-extracted siblings — `pipeline` (to ensure the
 /// queue and pass it to the loop), `channelHealth` (start/stop on state
-/// transitions), `permissions` (seed the loop's permission checker), and
-/// `liveTranscription` (attach live sinks to each recorder). It holds those
+/// transitions) and `liveTranscription` (attach live sinks to each recorder).
+/// It holds those
 /// siblings as direct references (not an `AppState` back-reference) since they
 /// are all constructed before this controller in `AppState.init`.
 ///
@@ -38,7 +38,6 @@ final class WatchingController {
     private let notifier: any AppNotifying
     private let pipeline: PipelineController
     private let channelHealth: ChannelHealthController
-    private let permissions: PermissionsController
     private let liveTranscription: LiveTranscriptionCoordinator
 
     /// Microphone-access gate. Injectable so tests skip the real TCC prompt; the
@@ -56,6 +55,23 @@ final class WatchingController {
     /// so a manual start proceeds either way and the health check reports the
     /// state.
     private let requestScreenRecording: () -> Void
+
+    /// The permission gate each `WatchLoop` this controller builds runs before
+    /// starting, asked about the source that start opens.
+    ///
+    /// It deliberately does **not** read `permissions.health`, which it used
+    /// to. That cache is filled by `PermissionHealthCheck.runPassive()` and so
+    /// can never report a microphone as `.broken`; handing it to the gate would
+    /// leave nothing anywhere in the app running the probe, which is a slower
+    /// way of deleting the check than deleting it. The gate is the one place
+    /// the probe costs the user nothing, because the recorder opens the same
+    /// device a moment later.
+    ///
+    /// Injectable for the reason the recorder factory is: `swift test
+    /// --parallel` forks several processes, and each one running a real HAL
+    /// probe intermittently comes back denied, which a start then correctly
+    /// refuses.
+    private let permissionChecker: (RecordingSource) async -> HealthCheckResult
 
     /// Recorder factory, injectable so a test can assert that a start succeeded,
     /// or make one fail on demand, without opening the machine's real input
@@ -99,10 +115,12 @@ final class WatchingController {
         notifier: any AppNotifying,
         pipeline: PipelineController,
         channelHealth: ChannelHealthController,
-        permissions: PermissionsController,
         liveTranscription: LiveTranscriptionCoordinator,
         ensureMicAccess: @escaping () async -> Bool = { await Permissions.ensureMicrophoneAccess() },
         requestScreenRecording: @escaping () -> Void = { Permissions.ensureScreenRecordingAccess() },
+        permissionChecker: @escaping (RecordingSource) async -> HealthCheckResult = { source in
+            await PermissionHealthCheck.runForRecordingStart(source: source)
+        },
         startJoinTimeout: Duration = WatchingController.defaultStartJoinTimeout,
         makeRecorder: @escaping @MainActor () -> any RecordingProvider = { DualSourceRecorder() },
         makeSleepBlocker: @escaping @MainActor () -> any RecordingSleepBlocking = {
@@ -118,11 +136,11 @@ final class WatchingController {
         self.notifier = notifier
         self.pipeline = pipeline
         self.channelHealth = channelHealth
-        self.permissions = permissions
         self.liveTranscription = liveTranscription
         self.askDeliverability = askDeliverability
         self.ensureMicAccess = ensureMicAccess
         self.requestScreenRecording = requestScreenRecording
+        self.permissionChecker = permissionChecker
         self.startJoinTimeout = startJoinTimeout
         self.makeRecorder = makeRecorder
         self.makeSleepBlocker = makeSleepBlocker
@@ -268,10 +286,7 @@ final class WatchingController {
         // notification work for manual recordings.
         attachStateChangeHandler(to: loop)
 
-        // Use cached health check result instead of live probe
-        if let health = permissions.health {
-            loop.permissionChecker = { health }
-        }
+        loop.permissionChecker = permissionChecker
 
         // A manual tap start has no moment that asks for Screen Recording up
         // front — on a fresh install the tap would silently capture silence

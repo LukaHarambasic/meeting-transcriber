@@ -39,7 +39,14 @@ class WatchLoop {
     // Dependencies
     let recorderFactory: @MainActor () async -> any RecordingProvider
     var pipelineQueue: PipelineQueue?
-    var permissionChecker: () async -> HealthCheckResult = { await PermissionHealthCheck.runLive() }
+    /// Permission gate for a start, asked about the source it is about to open.
+    ///
+    /// Takes the source rather than answering in general because the answer is
+    /// not free: the microphone arm of the live check opens the input device,
+    /// and a recording that captures no microphone must not pay for that.
+    var permissionChecker: (RecordingSource) async -> HealthCheckResult = { source in
+        await PermissionHealthCheck.runForRecordingStart(source: source)
+    }
 
     // Settings
     /// Cadence of `monitorManualRecording`'s poll loop.
@@ -253,7 +260,7 @@ class WatchLoop {
         }
 
         // Gate on what this path needs, not on overall health (see `blocksRecording`).
-        let health = await permissionChecker()
+        let health = await permissionChecker(source)
         if let refusal = health.recordingRefusalReason(for: source) {
             throw RecorderError.permissionDenied(refusal)
         }

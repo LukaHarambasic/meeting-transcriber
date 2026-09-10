@@ -60,7 +60,7 @@ final class WatchLoopActiveRecorderTests: XCTestCase {
             maxDuration: 10,
             noMic: true,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 
@@ -88,7 +88,7 @@ final class WatchLoopActiveRecorderTests: XCTestCase {
             maxDuration: 10,
             noMic: true,
         )
-        loop.permissionChecker = {
+        loop.permissionChecker = { _ in
             HealthCheckResult(screenRecording: .healthy, microphone: .healthy)
         }
 
