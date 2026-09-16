@@ -56,8 +56,8 @@ private final class FakeNotesStore: NotesStoring, @unchecked Sendable {
 final class NotesEditorViewTests: XCTestCase {
     // MARK: - Helpers
 
-    private func makeController(target: NoteTarget, now: Date = Date(timeIntervalSince1970: 1_700_000_000)) -> NotesController {
-        NotesController(store: FakeNotesStore(), resolveTarget: { target }, now: { now })
+    private func makeController(target: NoteTarget) -> NotesController {
+        NotesController(store: FakeNotesStore()) { target }
     }
 
     private func makeTextView(text: String, caret: Int) -> NotesMarkdownTextView {
@@ -130,29 +130,6 @@ final class NotesEditorViewTests: XCTestCase {
         XCTAssertTrue(found, "expected a footer Text equal to '\(expectedName)'")
     }
 
-    // MARK: - Timestamp button (ViewInspector)
-
-    func testTimestampButtonDisabledForScratchTarget() throws {
-        let controller = makeController(target: .scratch(day: Date()))
-        let body = try NotesEditorView(controller: controller).inspect()
-        let button = try body.find(viewWithAccessibilityIdentifier: A11yID.notesTimestampButton)
-        XCTAssertTrue(button.isDisabled())
-    }
-
-    func testTimestampButtonEnabledForLiveTarget() throws {
-        let controller = makeController(target: .liveRecording(stem: "20260101_120000", startedAt: Date()))
-        let body = try NotesEditorView(controller: controller).inspect()
-        let button = try body.find(viewWithAccessibilityIdentifier: A11yID.notesTimestampButton)
-        XCTAssertFalse(button.isDisabled())
-    }
-
-    func testTimestampButtonTapDoesNotThrow() throws {
-        let controller = makeController(target: .liveRecording(stem: "20260101_120000", startedAt: Date()))
-        let body = try NotesEditorView(controller: controller).inspect()
-        let button = try body.find(viewWithAccessibilityIdentifier: A11yID.notesTimestampButton)
-        XCTAssertNoThrow(try button.button().tap())
-    }
-
     // MARK: - NotesMarkdownTextView: Return
 
     func testReturnAfterNonBlankBulletItemContinuesList() {
@@ -218,24 +195,6 @@ final class NotesEditorViewTests: XCTestCase {
         XCTAssertEqual(textView.string, "*hello* world")
     }
 
-    // MARK: - NotesMarkdownTextView: ⌘T
-
-    func testCommandTInsertsControllerTimestampAtCaret() throws {
-        let textView = makeTextView(text: "hello world", caret: 5)
-        textView.onInsertTimestamp = { "[12:34]" }
-        let event = try keyEvent(character: "t", modifiers: .command)
-        XCTAssertTrue(textView.performKeyEquivalent(with: event))
-        XCTAssertEqual(textView.string, "hello[12:34]  world")
-    }
-
-    func testCommandTDoesNothingWhenOnInsertTimestampReturnsNil() throws {
-        let textView = makeTextView(text: "hello world", caret: 5)
-        textView.onInsertTimestamp = { nil }
-        let event = try keyEvent(character: "t", modifiers: .command)
-        XCTAssertTrue(textView.performKeyEquivalent(with: event))
-        XCTAssertEqual(textView.string, "hello world")
-    }
-
     // MARK: - NotesMarkdownTextView: Escape
 
     func testEscapeCallsOnEscape() {
@@ -268,24 +227,6 @@ final class NotesEditorViewTests: XCTestCase {
         coordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: NSObject()))
 
         XCTAssertEqual(bound, "unchanged")
-    }
-
-    // MARK: - Timestamp trigger dedup (issue: clock-icon freeze while recording)
-
-    /// `insertTimestamp()`'s own side effect (the `text` binding mutating
-    /// mid-update) causes SwiftUI to re-run `updateNSView` for the same
-    /// logical button press before the caller can move `timestampTrigger`
-    /// on — this simulates that repeat pass. Before the fix this decision
-    /// was just `timestampTrigger` (a `Bool` reset asynchronously), which
-    /// fired again here and, live, repeated indefinitely.
-    func testShouldHandleTimestampTriggerIgnoresARepeatedPassForTheSameTrigger() {
-        XCTAssertTrue(NotesTextView.shouldHandleTimestampTrigger(current: 1, lastHandled: 0))
-        XCTAssertFalse(NotesTextView.shouldHandleTimestampTrigger(current: 1, lastHandled: 1))
-        XCTAssertFalse(NotesTextView.shouldHandleTimestampTrigger(current: 1, lastHandled: 1))
-    }
-
-    func testShouldHandleTimestampTriggerFiresAgainForANewButtonPress() {
-        XCTAssertTrue(NotesTextView.shouldHandleTimestampTrigger(current: 2, lastHandled: 1))
     }
 
     // MARK: - Live styling wiring

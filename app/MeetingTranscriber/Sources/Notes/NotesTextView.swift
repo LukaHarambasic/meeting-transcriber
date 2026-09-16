@@ -4,7 +4,7 @@ import SwiftUI
 /// `NSTextView` subclass carrying the editing behaviours the pure
 /// `MarkdownEditingCommands` describe: Return continues (or ends) a
 /// list/checkbox/numbered item, Tab/Shift-Tab indent/outdent one, ⌘B/⌘I
-/// toggle-wrap the selection, ⌘T inserts a timestamp, Escape closes the panel.
+/// toggle-wrap the selection, Escape closes the panel.
 ///
 /// Every override here does the minimum AppKit plumbing (read the current
 /// line/selection, ask a pure function what should happen, write the result
@@ -17,9 +17,6 @@ import SwiftUI
 /// `NSRange` only via `NSRange(_:in:)`/`Range(_:in:)` — `NSString` is a
 /// legacy bridging type the repo's lint config forbids (`legacy_objc_type`).
 final class NotesMarkdownTextView: NSTextView {
-    /// The ⌘T insertion text (`NotesController.timestamp()`), or nil for a
-    /// scratch note — matching the controller's own contract.
-    var onInsertTimestamp: (() -> String?)?
     /// Escape — `NotesController.close()`.
     var onEscape: (() -> Void)?
 
@@ -92,7 +89,7 @@ final class NotesMarkdownTextView: NSTextView {
         return MarkdownEditingCommands.isListLine(line)
     }
 
-    // MARK: - ⌘B / ⌘I / ⌘T
+    // MARK: - ⌘B / ⌘I
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.type == .keyDown,
@@ -111,21 +108,9 @@ final class NotesMarkdownTextView: NSTextView {
             apply(MarkdownEditingCommands.toggleWrap(text: string, selection: selectedRange(), token: "*"))
             return true
 
-        case "t":
-            insertTimestamp()
-            return true
-
         default:
             return super.performKeyEquivalent(with: event)
         }
-    }
-
-    /// Called for both the ⌘T shortcut and the header's timestamp button
-    /// (via `NotesTextView.timestampTrigger`), so both insert at the live
-    /// caret through the same path.
-    func insertTimestamp() {
-        guard let stamp = onInsertTimestamp?() else { return }
-        insertText(stamp + " ", replacementRange: selectedRange())
     }
 
     // MARK: - Escape
@@ -156,20 +141,15 @@ final class NotesMarkdownTextView: NSTextView {
     }
 }
 
-/// Bridges `NotesMarkdownTextView` into SwiftUI: syncs `text` both ways,
-/// re-applies `MarkdownLiveStyle` after every change, and relays the header's
-/// timestamp button through `timestampTrigger` so the button and ⌘T insert at
-/// the same live caret position via the same `NotesMarkdownTextView.insertTimestamp()`.
+/// Bridges `NotesMarkdownTextView` into SwiftUI: syncs `text` both ways and
+/// re-applies `MarkdownLiveStyle` after every change.
 struct NotesTextView: NSViewRepresentable {
     @Binding var text: String
-    var timestampTrigger: Int
-    var onInsertTimestamp: () -> String?
     var onClose: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = NotesMarkdownTextView()
         textView.delegate = context.coordinator
-        textView.onInsertTimestamp = onInsertTimestamp
         textView.onEscape = onClose
         textView.string = text
         textView.isRichText = false
@@ -196,36 +176,14 @@ struct NotesTextView: NSViewRepresentable {
         return scrollView
     }
 
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
+    func updateNSView(_ nsView: NSScrollView, context _: Context) {
         guard let textView = nsView.documentView as? NotesMarkdownTextView else { return }
-        textView.onInsertTimestamp = onInsertTimestamp
         textView.onEscape = onClose
 
         if textView.string != text {
             textView.string = text
             Self.applyStyle(to: textView)
         }
-
-        // Compared, never written back: `insertTimestamp()` inserts text,
-        // which fires `textDidChange` synchronously and mutates the `text`
-        // binding while this same SwiftUI update is still in progress. That
-        // mutation schedules a re-render, and had `timestampTrigger` itself
-        // needed resetting through a binding, that reset could lose the race
-        // against the re-render and fire a second insert — repeating
-        // indefinitely and freezing the app. Tracking "last handled" on the
-        // coordinator instead means there is nothing to race.
-        if Self.shouldHandleTimestampTrigger(current: timestampTrigger, lastHandled: context.coordinator.lastHandledTimestampTrigger) {
-            context.coordinator.lastHandledTimestampTrigger = timestampTrigger
-            textView.insertTimestamp()
-        }
-    }
-
-    /// Extracted so the property that fixes the freeze above — an unchanged
-    /// trigger value never fires a second insert, no matter how many times
-    /// `updateNSView` re-runs for other reasons — is testable without a real
-    /// SwiftUI `Context`, which has no public initializer.
-    static func shouldHandleTimestampTrigger(current: Int, lastHandled: Int) -> Bool {
-        current != lastHandled
     }
 
     func makeCoordinator() -> Coordinator {
@@ -234,7 +192,6 @@ struct NotesTextView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
-        var lastHandledTimestampTrigger = 0
 
         init(text: Binding<String>) {
             _text = text

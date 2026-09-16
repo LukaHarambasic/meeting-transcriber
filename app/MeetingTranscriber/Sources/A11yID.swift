@@ -85,7 +85,6 @@ enum A11yID {
     // holds meeting content (same rule as the speaker-naming window).
     static let notesEditor = "notesEditor"
     static let notesTargetLabel = "notesTargetLabel"
-    static let notesTimestampButton = "notesTimestampButton"
 
     // Settings → Notes tab. Ordinary Settings-window controls (unlike the
     // panel above), so no allowlist restriction applies to these.

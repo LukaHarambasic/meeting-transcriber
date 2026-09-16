@@ -6,33 +6,17 @@ import SwiftUI
 ///
 /// Deliberately thin — `controller` (`NotesController`) owns the text, the
 /// target and the write-through to disk; this view only renders that state
-/// and forwards the two things it can originate itself: the ⌘T timestamp
-/// button and the editor's key commands (Return/Tab/⌘B/⌘I/⌘T/Escape, all in
+/// and forwards the editor's key commands (Return/Tab/⌘B/⌘I/Escape, all in
 /// `NotesMarkdownTextView`).
 struct NotesEditorView: View {
     @Bindable var controller: NotesController
 
-    /// Increments to ask `NotesTextView` to insert a timestamp at the live
-    /// caret — see `NotesTextView.updateNSView`. A counter rather than a
-    /// `Bool` because `updateNSView` never writes it back: the previous
-    /// `Bool` had to be reset to `false` after handling, and doing that from
-    /// inside `updateNSView` raced the re-render `insertTimestamp()` itself
-    /// triggers (via `textDidChange` -> the `text` binding), which could win
-    /// that race and fire a second insert while the reset was still pending
-    /// — repeating indefinitely and freezing the app (issue: clock-icon
-    /// freeze while recording). A monotonic value that `updateNSView` only
-    /// ever compares, never mutates, has no reset to race.
-    @State private var timestampTrigger = 0
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            NotesTextView(
-                text: $controller.text,
-                timestampTrigger: timestampTrigger,
-                onInsertTimestamp: { controller.timestamp() },
-                onClose: { controller.close() },
-            )
+            NotesTextView(text: $controller.text) {
+                controller.close()
+            }
             .frame(minWidth: 360, minHeight: 240)
             footer
         }
@@ -47,18 +31,6 @@ struct NotesEditorView: View {
             Text(targetLabel)
                 .font(.headline)
                 .accessibilityIdentifier(A11yID.notesTargetLabel)
-
-            Spacer()
-
-            Button {
-                timestampTrigger += 1
-            } label: {
-                Image(systemName: "clock.badge")
-            }
-            .controlSize(.large)
-            .disabled(!controller.target.isLive)
-            .accessibilityIdentifier(A11yID.notesTimestampButton)
-            .help("Insert timestamp")
         }
     }
 

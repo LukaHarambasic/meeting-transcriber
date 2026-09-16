@@ -35,7 +35,6 @@ final class NotesController {
 
     @ObservationIgnored private let store: any NotesStoring
     @ObservationIgnored private let resolveTarget: () -> NoteTarget
-    @ObservationIgnored private let now: () -> Date
 
     /// Suppresses the write-through while `text` is being filled from disk, so
     /// opening the panel cannot write the file it just read.
@@ -44,11 +43,9 @@ final class NotesController {
     init(
         store: any NotesStoring,
         resolveTarget: @escaping () -> NoteTarget,
-        now: @escaping () -> Date = Date.init,
     ) {
         self.store = store
         self.resolveTarget = resolveTarget
-        self.now = now
         let initial: NoteTarget = resolveTarget()
         self.target = initial
     }
@@ -103,12 +100,6 @@ final class NotesController {
     }
 
     // MARK: - Editing helpers
-
-    /// The meeting-relative timestamp to insert at the cursor, or nil when the
-    /// current target is a scratch note and there is no meeting to be relative to.
-    func timestamp() -> String? {
-        target.elapsedStamp(at: now())
-    }
 
     /// The file the current text is being written to. Read by the panel's footer
     /// so "where does this go" is answerable without opening a Finder window.

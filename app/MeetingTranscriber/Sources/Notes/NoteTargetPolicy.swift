@@ -13,9 +13,9 @@ enum NoteTargetPolicy {
     ///
     /// The two partial cases are decided deliberately rather than left to
     /// crash:
-    /// - a stem with no start date would produce a live target whose
-    ///   `elapsedStamp` has nothing to be relative to, so it falls back to
-    ///   `.scratch`;
+    /// - a stem with no start date would produce a live target with nothing
+    ///   for the panel's header to show as the recording's start time, so it
+    ///   falls back to `.scratch`;
     /// - a start date with no stem (the recording just stopped, or one that
     ///   was never given a stem) cannot be found again by the pipeline, which
     ///   reads notes by stem — so it also falls back to `.scratch`.
