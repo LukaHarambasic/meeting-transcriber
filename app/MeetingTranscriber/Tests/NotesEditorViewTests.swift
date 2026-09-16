@@ -270,6 +270,24 @@ final class NotesEditorViewTests: XCTestCase {
         XCTAssertEqual(bound, "unchanged")
     }
 
+    // MARK: - Timestamp trigger dedup (issue: clock-icon freeze while recording)
+
+    /// `insertTimestamp()`'s own side effect (the `text` binding mutating
+    /// mid-update) causes SwiftUI to re-run `updateNSView` for the same
+    /// logical button press before the caller can move `timestampTrigger`
+    /// on — this simulates that repeat pass. Before the fix this decision
+    /// was just `timestampTrigger` (a `Bool` reset asynchronously), which
+    /// fired again here and, live, repeated indefinitely.
+    func testShouldHandleTimestampTriggerIgnoresARepeatedPassForTheSameTrigger() {
+        XCTAssertTrue(NotesTextView.shouldHandleTimestampTrigger(current: 1, lastHandled: 0))
+        XCTAssertFalse(NotesTextView.shouldHandleTimestampTrigger(current: 1, lastHandled: 1))
+        XCTAssertFalse(NotesTextView.shouldHandleTimestampTrigger(current: 1, lastHandled: 1))
+    }
+
+    func testShouldHandleTimestampTriggerFiresAgainForANewButtonPress() {
+        XCTAssertTrue(NotesTextView.shouldHandleTimestampTrigger(current: 2, lastHandled: 1))
+    }
+
     // MARK: - Live styling wiring
 
     /// Proves the wiring, not just the parts: `MarkdownLiveStyle.runs` is

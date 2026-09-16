@@ -12,16 +12,24 @@ import SwiftUI
 struct NotesEditorView: View {
     @Bindable var controller: NotesController
 
-    /// Flips true to ask `NotesTextView` to insert a timestamp at the live
-    /// caret, then flips back once handled — see `NotesTextView.updateNSView`.
-    @State private var timestampTrigger = false
+    /// Increments to ask `NotesTextView` to insert a timestamp at the live
+    /// caret — see `NotesTextView.updateNSView`. A counter rather than a
+    /// `Bool` because `updateNSView` never writes it back: the previous
+    /// `Bool` had to be reset to `false` after handling, and doing that from
+    /// inside `updateNSView` raced the re-render `insertTimestamp()` itself
+    /// triggers (via `textDidChange` -> the `text` binding), which could win
+    /// that race and fire a second insert while the reset was still pending
+    /// — repeating indefinitely and freezing the app (issue: clock-icon
+    /// freeze while recording). A monotonic value that `updateNSView` only
+    /// ever compares, never mutates, has no reset to race.
+    @State private var timestampTrigger = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             NotesTextView(
                 text: $controller.text,
-                timestampTrigger: $timestampTrigger,
+                timestampTrigger: timestampTrigger,
                 onInsertTimestamp: { controller.timestamp() },
                 onClose: { controller.close() },
             )
@@ -43,7 +51,7 @@ struct NotesEditorView: View {
             Spacer()
 
             Button {
-                timestampTrigger = true
+                timestampTrigger += 1
             } label: {
                 Image(systemName: "clock.badge")
             }

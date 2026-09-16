@@ -162,7 +162,7 @@ final class NotesMarkdownTextView: NSTextView {
 /// the same live caret position via the same `NotesMarkdownTextView.insertTimestamp()`.
 struct NotesTextView: NSViewRepresentable {
     @Binding var text: String
-    @Binding var timestampTrigger: Bool
+    var timestampTrigger: Int
     var onInsertTimestamp: () -> String?
     var onClose: () -> Void
 
@@ -196,7 +196,7 @@ struct NotesTextView: NSViewRepresentable {
         return scrollView
     }
 
-    func updateNSView(_ nsView: NSScrollView, context _: Context) {
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NotesMarkdownTextView else { return }
         textView.onInsertTimestamp = onInsertTimestamp
         textView.onEscape = onClose
@@ -206,12 +206,26 @@ struct NotesTextView: NSViewRepresentable {
             Self.applyStyle(to: textView)
         }
 
-        if timestampTrigger {
+        // Compared, never written back: `insertTimestamp()` inserts text,
+        // which fires `textDidChange` synchronously and mutates the `text`
+        // binding while this same SwiftUI update is still in progress. That
+        // mutation schedules a re-render, and had `timestampTrigger` itself
+        // needed resetting through a binding, that reset could lose the race
+        // against the re-render and fire a second insert — repeating
+        // indefinitely and freezing the app. Tracking "last handled" on the
+        // coordinator instead means there is nothing to race.
+        if Self.shouldHandleTimestampTrigger(current: timestampTrigger, lastHandled: context.coordinator.lastHandledTimestampTrigger) {
+            context.coordinator.lastHandledTimestampTrigger = timestampTrigger
             textView.insertTimestamp()
-            // Deferred: flipping the binding back synchronously here would
-            // mutate state during this same SwiftUI update pass.
-            DispatchQueue.main.async { timestampTrigger = false }
         }
+    }
+
+    /// Extracted so the property that fixes the freeze above — an unchanged
+    /// trigger value never fires a second insert, no matter how many times
+    /// `updateNSView` re-runs for other reasons — is testable without a real
+    /// SwiftUI `Context`, which has no public initializer.
+    static func shouldHandleTimestampTrigger(current: Int, lastHandled: Int) -> Bool {
+        current != lastHandled
     }
 
     func makeCoordinator() -> Coordinator {
@@ -220,6 +234,7 @@ struct NotesTextView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
+        var lastHandledTimestampTrigger = 0
 
         init(text: Binding<String>) {
             _text = text
