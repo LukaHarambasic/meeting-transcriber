@@ -16,8 +16,20 @@ import AppKit
 /// `NotesWindowPolicy.apply(to:)` is applied once at construction — it is
 /// static configuration (sharing type, level, collection behavior), not
 /// something that needs reapplying per show/hide cycle.
+///
+/// `NotesWindowPolicy.apply(to:)` also adds `.closable`, so the standard red
+/// traffic-light button renders (the hidden/transparent title bar only
+/// removes the title text, not the buttons) — without it the panel had no
+/// on-screen way to close at all, leaving Escape (which needs the text view
+/// focused) and the ⌥⌘N hotkey (which the user can disable) as the only
+/// routes. Clicking it must not let AppKit close the panel on its own: that
+/// would hide it without telling `NotesController`, so the next hotkey press
+/// would think the panel was still open and try to "close" an already-closed
+/// window. The delegate below routes the click through `onCloseRequested`
+/// instead and refuses the native close, so `isVisible` stays the single
+/// source of truth.
 @MainActor
-final class NotesWindowController {
+final class NotesWindowController: NSObject {
     /// UserDefaults key for the panel's frame (origin + size), stored as
     /// `{"x", "y", "width", "height"}`. Absence means "first run, use the
     /// default size centred on the main screen".
@@ -26,10 +38,11 @@ final class NotesWindowController {
     private static let defaultSize = NSSize(width: 420, height: 560)
 
     private let panel: NSPanel
+    private let onCloseRequested: () -> Void
     private var moveObserver: (any NSObjectProtocol)?
     private var resizeObserver: (any NSObjectProtocol)?
 
-    init(contentView: NSView) {
+    init(contentView: NSView, onCloseRequested: @escaping () -> Void) {
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: Self.defaultSize),
             styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
@@ -44,6 +57,9 @@ final class NotesWindowController {
         panel.isReleasedWhenClosed = false
         NotesWindowPolicy.apply(to: panel)
         self.panel = panel
+        self.onCloseRequested = onCloseRequested
+        super.init()
+        panel.delegate = self
         installFrameObservers()
     }
 
@@ -115,5 +131,16 @@ final class NotesWindowController {
                 self.persistFrame(self.panel.frame)
             }
         }
+    }
+}
+
+extension NotesWindowController: NSWindowDelegate {
+    /// Refuses the native close so `NotesController.isVisible` stays the one
+    /// source of truth: this hands the click to the same path the hotkey and
+    /// menu toggle use, which hides the panel via `hide()` once the caller
+    /// updates its state.
+    func windowShouldClose(_: NSWindow) -> Bool {
+        onCloseRequested()
+        return false
     }
 }

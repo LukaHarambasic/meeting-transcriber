@@ -99,6 +99,20 @@ final class NotesWindowPolicyTests: XCTestCase {
         )
     }
 
+    func testAddsClosableStyleMaskBit() {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+            styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true,
+        )
+        NotesWindowPolicy.apply(to: panel)
+        XCTAssertTrue(
+            panel.styleMask.contains(.closable),
+            "the panel must be closable, or it has no on-screen way to close",
+        )
+    }
+
     func testIsIdempotent() {
         let panel = makeUnpolicedPanel()
         NotesWindowPolicy.apply(to: panel)

@@ -346,7 +346,9 @@ struct MeetingTranscriberApp: App {
     private func applyNotesVisibility(_ visible: Bool) {
         let controller: NotesWindowController = notesWindow ?? {
             let host = NSHostingView(rootView: NotesEditorView(controller: appState.notes))
-            let made = NotesWindowController(contentView: host)
+            let made = NotesWindowController(contentView: host) {
+                appState.notes.close()
+            }
             notesWindow = made
             return made
         }()

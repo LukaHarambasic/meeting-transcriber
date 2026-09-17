@@ -29,12 +29,18 @@ import AppKit
 /// mutually-exclusive `NSWindowCollectionBehavior` group, so the conflicting
 /// members are cleared before the wanted ones are unioned in — otherwise
 /// AppKit silently ignores them. Unrelated flags are preserved.
+///
+/// - `styleMask` gains `.closable` — the hidden/transparent title bar
+///   (`NotesWindowController`) removes the title text, not the traffic-light
+///   buttons, but the buttons only render at all when their style-mask bit
+///   is set. Without it the panel had no on-screen way to close.
 enum NotesWindowPolicy {
     @MainActor
     static func apply(to panel: NSPanel) {
         panel.sharingType = .none
         panel.level = .floating
         panel.hidesOnDeactivate = false
+        panel.styleMask.insert(.closable)
         var behavior = panel.collectionBehavior
         // Drop the other members of the two exclusive groups we set below.
         behavior.subtract([.managed, .moveToActiveSpace, .stationary, .fullScreenPrimary, .fullScreenNone])
