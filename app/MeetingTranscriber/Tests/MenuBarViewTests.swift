@@ -1,6 +1,4 @@
 @testable import MeetingTranscriber
-
-// swiftlint:disable file_length
 import ViewInspector
 import XCTest
 
@@ -36,6 +34,7 @@ final class MenuBarViewTests: XCTestCase {
         onNameSpeakers: (() -> Void)? = nil,
         onStopManualRecording: (() -> Void)? = nil,
         onRecordMeeting: @escaping () -> Void = {},
+        onOpenSettings: @escaping () -> Void = {},
         manualRecordingPendingOrActive: Bool = false,
     ) -> MenuBarView {
         MenuBarView(
@@ -47,11 +46,41 @@ final class MenuBarViewTests: XCTestCase {
             onStopManualRecording: onStopManualRecording,
             onOpenLastProtocol: {},
             onOpenProtocolsFolder: {},
-            onOpenSettings: {},
+            onOpenSettings: onOpenSettings,
             onOpenNotes: {},
             onNameSpeakers: onNameSpeakers,
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
+    }
+
+    /// A job in any state. Inserted through `insertJobForTesting` so no test
+    /// starts the real processing trigger or writes a queue snapshot.
+    private func makeJob(
+        _ title: String,
+        state: JobState = .waiting,
+        error: String? = nil,
+        warnings: [String] = [],
+    ) -> PipelineJob {
+        var job = PipelineJob(
+            meetingTitle: title,
+            appName: "Teams",
+            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
+            appPath: nil,
+            micPath: nil,
+            micDelay: 0,
+        )
+        job.state = state
+        job.error = error
+        job.warnings = warnings
+        return job
+    }
+
+    private func makeQueue(_ jobs: [PipelineJob]) -> PipelineQueue {
+        let queue = PipelineQueue()
+        for job in jobs {
+            queue.insertJobForTesting(job)
+        }
+        return queue
     }
 
     // MARK: - No status header
@@ -92,7 +121,7 @@ final class MenuBarViewTests: XCTestCase {
     /// The regression the whole issue row exists for: the problem has to show
     /// while *nothing* is recording, because that is exactly when a refused
     /// start leaves the user with a red icon and the word "Idle". `status` is nil
-    /// here — the old error row read `status?.error` and so could never fire.
+    /// here, and the old error row read `status?.error` and so could never fire.
     func testIssueShownWithNoActiveStatus() throws {
         let issue = RecordingIssue(headline: "Boom", remedy: nil)
         let sut = makeView(status: nil, issue: issue)
@@ -143,13 +172,16 @@ final class MenuBarViewTests: XCTestCase {
     func testOpenLastProtocolShownWhenPathPresent() throws {
         let sut = makeView(status: makeStatus(state: .protocolReady, protocolPath: "/tmp/p.md"))
         let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Open Last Protocol"))
+        XCTAssertNoThrow(try body.find(text: "Open Last Transcript"))
     }
 
     func testOpenLastProtocolHiddenWhenNoPath() throws {
         let sut = makeView(status: makeStatus(state: .idle))
         let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(text: "Open Last Protocol"))
+        XCTAssertThrowsError(try body.find(text: "Open Last Transcript"))
+        // Control: the same body does render its other static rows, so the
+        // absence above is about this row and not about an empty inspection.
+        XCTAssertNoThrow(try body.find(text: "Open Transcripts Folder"))
     }
 
     // MARK: - Static buttons always present
@@ -163,7 +195,7 @@ final class MenuBarViewTests: XCTestCase {
     func testOpenProtocolsFolderButtonExists() throws {
         let sut = makeView(status: makeStatus())
         let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Open Protocols Folder"))
+        XCTAssertNoThrow(try body.find(text: "Open Transcripts Folder"))
     }
 
     func testQuitButtonExists() throws {
@@ -257,7 +289,7 @@ final class MenuBarViewTests: XCTestCase {
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
-        try body.find(button: "Open Protocols Folder").tap()
+        try body.find(button: "Open Transcripts Folder").tap()
         XCTAssertTrue(called)
     }
 
@@ -278,7 +310,7 @@ final class MenuBarViewTests: XCTestCase {
             onQuit: {}, // swiftlint:disable:this trailing_closure
         )
         let body = try sut.inspect()
-        try body.find(button: "Open Last Protocol").tap()
+        try body.find(button: "Open Last Transcript").tap()
         XCTAssertTrue(called)
     }
 
@@ -308,24 +340,26 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertTrue(called)
     }
 
-    // MARK: - State label
+    // MARK: - Queue rows
 
-    func testNilStatusShowsIdleLabel() throws {
-        let sut = makeView(status: nil)
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Idle"))
+    /// The menu lists problems, not progress. A job that is waiting, running or
+    /// finished cleanly adds no row at all: no title, no state text, and none of
+    /// the Open / Cancel / Dismiss buttons the per-job rows used to carry (those
+    /// moved to Settings, Transcripts and Diagnostics).
+    func testJobsWithoutAProblemAddNoMenuRows() throws {
+        let states: [JobState] = [.waiting, .transcribing, .diarizing, .generatingProtocol, .done]
+        for state in states {
+            let queue = makeQueue([makeJob("Standup", state: state)])
+            let body = try makeView(status: makeStatus(), pipelineQueue: queue).inspect()
+            XCTAssertThrowsError(try body.find(text: "Standup"), "a \(state) job leaked into the menu")
+            XCTAssertThrowsError(try body.find(text: "Processing"), "\(state)")
+            XCTAssertThrowsError(try body.find(button: "Cancel"), "\(state)")
+            XCTAssertThrowsError(try body.find(button: "Dismiss"), "\(state)")
+            XCTAssertThrowsError(try body.find(button: "Open"), "\(state)")
+            // Control: the menu itself did render.
+            XCTAssertNoThrow(try body.find(text: "Quit"), "\(state)")
+        }
     }
-
-    func testMeetingAppAndPidShown() throws {
-        let meeting = MeetingInfo(app: "Zoom", title: "Retro", pid: 456)
-        let sut = makeView(status: makeStatus(state: .recording, meeting: meeting))
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewType.Text.self)
-        let found = texts.contains { (try? $0.string())?.contains("Zoom") == true }
-        XCTAssertTrue(found, "App name 'Zoom' should appear in meeting info")
-    }
-
-    // MARK: - Processing section
 
     func testProcessingSectionHiddenWhenNoJobs() throws {
         let sut = makeView(status: makeStatus())
@@ -333,101 +367,92 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertThrowsError(try body.find(text: "Processing"))
     }
 
-    func testProcessingSectionShownWithActiveJob() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Standup",
-            appName: "Teams",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil,
-            micPath: nil,
-            micDelay: 0,
-        )
-        queue.enqueue(job)
-        queue.updateJobState(id: job.id, to: .transcribing)
-
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: queue,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onOpenNotes: {},
-            onNameSpeakers: nil,
-            onQuit: {}, // swiftlint:disable:this trailing_closure
-        )
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Processing"))
-        XCTAssertNoThrow(try body.find(text: "Standup"))
-        XCTAssertNoThrow(try body.find(text: "Transcribing... 0s"))
+    /// Both a warning and an error make a row; the row carries the meeting and
+    /// a short reason (`problemRowTitle`), not the whole sentence.
+    func testWarningJobShowsWarningRow() throws {
+        let queue = makeQueue([
+            makeJob("Standup", state: .done, warnings: ["App track diarization failed"]),
+        ])
+        let body = try makeView(status: makeStatus(), pipelineQueue: queue).inspect()
+        XCTAssertNoThrow(try body.find(text: "Standup · App track diarization failed"))
     }
 
-    func testDismissButtonShownForCompletedJob() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Retro",
-            appName: "Zoom",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil,
-            micPath: nil,
-            micDelay: 0,
-        )
-        queue.enqueue(job)
-        queue.updateJobState(id: job.id, to: .done)
-
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: queue,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onOpenNotes: {},
-            onNameSpeakers: nil,
-            onQuit: {}, // swiftlint:disable:this trailing_closure
-        )
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Dismiss"))
+    func testErrorJobShowsErrorRow() throws {
+        let queue = makeQueue([makeJob("Broken", state: .error, error: "Transcription failed")])
+        let body = try makeView(status: makeStatus(), pipelineQueue: queue).inspect()
+        XCTAssertNoThrow(try body.find(text: "Broken · Transcription failed"))
     }
 
-    func testWarningJobShowsWarningText() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Standup",
-            appName: "Teams",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil,
-            micPath: nil,
-            micDelay: 0,
-        )
-        var warningJob = job
-        warningJob.warnings.append("Diarization failed — speakers not identified")
-        warningJob.state = .done
-        queue.enqueue(warningJob)
+    func testEveryProblemJobGetsARow() throws {
+        let queue = makeQueue([
+            makeJob("Meeting 1", state: .error, error: "Empty transcript"),
+            makeJob("Meeting 2", state: .done, warnings: ["Speakers not identified"]),
+        ])
+        let body = try makeView(status: makeStatus(), pipelineQueue: queue).inspect()
+        XCTAssertNoThrow(try body.find(text: "Meeting 1 · Empty transcript"))
+        XCTAssertNoThrow(try body.find(text: "Meeting 2 · Speakers not identified"))
+    }
 
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: queue,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onOpenNotes: {},
-            onNameSpeakers: nil,
-            onQuit: {}, // swiftlint:disable:this trailing_closure
+    /// A problem row is a pointer to Settings, where the full text lives.
+    func testProblemRowOpensSettings() throws {
+        var opened = false
+        let queue = makeQueue([makeJob("Broken", state: .error, error: "Transcription failed")])
+        // swiftlint:disable:next trailing_closure
+        let sut = makeView(status: makeStatus(), pipelineQueue: queue, onOpenSettings: { opened = true })
+
+        try sut.inspect().find(button: "Broken · Transcription failed").tap()
+
+        XCTAssertTrue(opened)
+    }
+
+    /// At most `menuProblemLimit` rows; the rest collapse into one count row so
+    /// the menu cannot grow with the queue.
+    func testProblemRowsAreCappedWithAMoreRow() throws {
+        let limit = MenuBarView.menuProblemLimit
+        let jobs = (1 ... (limit + 2)).map { makeJob("Job \($0)", state: .error, error: "Failed") }
+        let body = try makeView(status: makeStatus(), pipelineQueue: makeQueue(jobs)).inspect()
+        for index in 1 ... limit {
+            XCTAssertNoThrow(try body.find(text: "Job \(index) · Failed"))
+        }
+        XCTAssertThrowsError(try body.find(text: "Job \(limit + 1) · Failed"))
+        XCTAssertNoThrow(try body.find(text: "2 more in Settings"))
+    }
+
+    func testNoMoreRowAtTheLimit() throws {
+        let limit = MenuBarView.menuProblemLimit
+        let jobs = (1 ... limit).map { makeJob("Job \($0)", state: .error, error: "Failed") }
+        let body = try makeView(status: makeStatus(), pipelineQueue: makeQueue(jobs)).inspect()
+        XCTAssertNoThrow(try body.find(text: "Job \(limit) · Failed"))
+        XCTAssertThrowsError(try body.find(text: "0 more in Settings"))
+    }
+
+    func testProblemRowTitleTruncatesTitleAndReason() {
+        let job = makeJob(
+            "A very long meeting title that overflows",
+            state: .error,
+            error: "A very long failure reason that would stretch the menu",
         )
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Diarization failed — speakers not identified"))
+        XCTAssertEqual(
+            MenuBarView.problemRowTitle(job),
+            "A very long meeting tit… · A very long failure reason th…",
+        )
+    }
+
+    func testProblemRowTitlePrefersErrorOverWarning() {
+        let job = makeJob("Standup", state: .error, error: "Boom", warnings: ["Soft problem"])
+        XCTAssertEqual(MenuBarView.problemRowTitle(job), "Standup · Boom")
+    }
+
+    func testProblemRowTitleFallsBackToStateLabel() {
+        let job = makeJob("Standup", state: .error)
+        XCTAssertEqual(MenuBarView.problemRowTitle(job), "Standup · \(JobState.error.label)")
+    }
+
+    func testProblemRowIconDistinguishesErrorFromWarning() {
+        XCTAssertNotEqual(
+            MenuBarView.problemRowIcon(makeJob("A", state: .error, error: "x")),
+            MenuBarView.problemRowIcon(makeJob("B", state: .done, warnings: ["x"])),
+        )
     }
 
     // MARK: - Stop Recording button (manual)
@@ -466,37 +491,6 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertTrue(called)
     }
 
-    // MARK: - Error job display
-
-    func testErrorJobShowsErrorMessage() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Broken",
-            appName: "Teams",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil, micPath: nil, micDelay: 0,
-        )
-        queue.enqueue(job)
-        queue.updateJobState(id: job.id, to: .error, error: "Transcription failed")
-
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: queue,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onOpenNotes: {},
-            onNameSpeakers: nil,
-            onQuit: {}, // swiftlint:disable:this trailing_closure
-        )
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Transcription failed"))
-    }
-
     // MARK: - Record/Stop button mutual exclusion
 
     func testRecordAndStopBothHiddenDuringAutoRecording() throws {
@@ -514,122 +508,23 @@ final class MenuBarViewTests: XCTestCase {
         XCTAssertThrowsError(try body.find(button: "Record"))
     }
 
-    // MARK: - Job state labels
+    // MARK: - No state labels
 
-    func testWaitingJobShowsWaitingLabel() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Standup",
-            appName: "Teams",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil, micPath: nil, micDelay: 0,
-        )
-        queue.enqueue(job)
-
-        let sut = makeView(status: makeStatus(), pipelineQueue: queue)
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Waiting..."))
-    }
-
-    func testCancelButtonShownForWaitingJob() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Sprint",
-            appName: "Zoom",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil, micPath: nil, micDelay: 0,
-        )
-        queue.enqueue(job)
-
-        let sut = makeView(status: makeStatus(), pipelineQueue: queue)
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(button: "Cancel"))
-    }
-
-    func testCancelButtonHiddenForDoneJob() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Sprint",
-            appName: "Zoom",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil, micPath: nil, micDelay: 0,
-        )
-        queue.enqueue(job)
-        queue.updateJobState(id: job.id, to: .done)
-
-        let sut = makeView(status: makeStatus(), pipelineQueue: queue)
-        let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(button: "Cancel"))
-    }
-
-    func testDoneJobWithoutPathsHidesOpenButton() throws {
-        let queue = PipelineQueue()
-        let job = PipelineJob(
-            meetingTitle: "Sprint",
-            appName: "Zoom",
-            mixPath: URL(fileURLWithPath: "/tmp/mix.wav"),
-            appPath: nil, micPath: nil, micDelay: 0,
-        )
-        queue.enqueue(job)
-        queue.updateJobState(id: job.id, to: .done)
-
-        let sut = makeView(status: makeStatus(), pipelineQueue: queue)
-        let body = try sut.inspect()
-        XCTAssertThrowsError(try body.find(button: "Open"))
-    }
-
-    // MARK: - All state labels shown
-
-    func testAllTranscriberStateLabelsRendered() throws {
+    /// `TranscriberState.label` is no longer rendered anywhere in the menu, for
+    /// any state; the controls and the problem rows carry what the app is doing.
+    func testNoTranscriberStateLabelIsRendered() throws {
         let states: [TranscriberState] = [
             .idle, .recording, .transcribing,
             .generatingProtocol, .protocolReady, .error,
         ]
         for state in states {
-            let sut = makeView(status: makeStatus(state: state))
-            let body = try sut.inspect()
-            XCTAssertNoThrow(
+            let body = try makeView(status: makeStatus(state: state)).inspect()
+            XCTAssertThrowsError(
                 try body.find(text: state.label),
-                "State label '\(state.label)' not found for \(state)",
+                "State label '\(state.label)' is rendered for \(state)",
             )
+            // Control: the menu itself did render.
+            XCTAssertNoThrow(try body.find(text: "Quit"), "\(state)")
         }
-    }
-
-    // MARK: - Multiple jobs
-
-    func testMultipleJobsRendered() throws {
-        let queue = PipelineQueue()
-        let job1 = PipelineJob(
-            meetingTitle: "Meeting 1",
-            appName: "Teams",
-            mixPath: URL(fileURLWithPath: "/tmp/mix1.wav"),
-            appPath: nil, micPath: nil, micDelay: 0,
-        )
-        let job2 = PipelineJob(
-            meetingTitle: "Meeting 2",
-            appName: "Zoom",
-            mixPath: URL(fileURLWithPath: "/tmp/mix2.wav"),
-            appPath: nil, micPath: nil, micDelay: 0,
-        )
-        queue.enqueue(job1)
-        queue.enqueue(job2)
-
-        let sut = MenuBarView(
-            status: makeStatus(),
-            issue: nil,
-            pipelineQueue: queue,
-            onRecordMeeting: {},
-            manualRecordingPendingOrActive: false,
-            onStopManualRecording: nil,
-            onOpenLastProtocol: {},
-            onOpenProtocolsFolder: {},
-            onOpenSettings: {},
-            onOpenNotes: {},
-            onNameSpeakers: nil,
-            onQuit: {}, // swiftlint:disable:this trailing_closure
-        )
-        let body = try sut.inspect()
-        XCTAssertNoThrow(try body.find(text: "Meeting 1"))
-        XCTAssertNoThrow(try body.find(text: "Meeting 2"))
     }
 }

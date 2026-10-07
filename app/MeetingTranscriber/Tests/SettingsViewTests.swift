@@ -388,9 +388,9 @@ final class SettingsViewTests: XCTestCase { // swiftlint:disable:this type_body_
         XCTAssertThrowsError(try body.find(text: "Endpoint"))
     }
 
-    func testProtocolLanguagePickerExists() throws {
+    func testTranscriptLanguagePickerExists() throws {
         let body = try makeOutput().inspect()
-        XCTAssertNoThrow(try body.find(text: "Protocol Language"))
+        XCTAssertNoThrow(try body.find(text: "Transcript Language"))
     }
 
     func testOutputFolderSectionExists() throws {

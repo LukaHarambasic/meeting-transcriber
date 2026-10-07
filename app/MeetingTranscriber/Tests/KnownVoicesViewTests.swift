@@ -161,7 +161,7 @@ final class KnownVoicesViewTests: XCTestCase { // swiftlint:disable:this balance
         let body = try view.inspect()
         // Hint only shows when an enrollment factory is wired — without one
         // the user can't act on the hint anyway.
-        XCTAssertThrowsError(try body.find(text: "Pipeline busy — diarization may be slower."))
+        XCTAssertThrowsError(try body.find(text: "Pipeline busy, so diarization may be slower."))
     }
 
     // MARK: - KnownVoicesFormatting.lastUsedLabel (pure helper, extracted from view)

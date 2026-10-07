@@ -37,7 +37,7 @@ enum BadgeKind: String, CaseIterable, Codable {
 /// - `.recording`: a wave travels across the bars
 /// - `.transcribing`: bars morph into horizontal text lines (audio → text)
 /// - `.diarizing`: bars split into two groups (speaker separation)
-/// - `.processing`: text lines appear sequentially (protocol being written)
+/// - `.processing`: text lines type out one after another (transcript being written)
 ///
 /// **Colour is reserved for exactly one thing: an error.** Everything else is a
 /// template image, so macOS inverts it for light and dark menu bars and for the
@@ -386,14 +386,22 @@ enum MenuBarIcon {
 
     // MARK: - Protocol Generation Animation (text lines appearing sequentially)
 
+    /// Each line types out in turn, growing from a dot to its full width.
+    ///
+    /// A line that simply appeared would leave only `barCount` distinct images
+    /// across the whole cycle, one new pose every 0.3 s. That is the "discrete
+    /// poses, not motion" the 24 fps change set out to remove, and it made this
+    /// the one badge still stepping. Growing the active line gives every frame
+    /// its own image while keeping the reveal spread across the whole cycle,
+    /// tied to `phase` rather than `frameCount`.
     private static func drawProtocolAnimation(in rect: NSRect, frame: Int) {
         let text = textLayout(in: rect)
-        // Spread the reveal across the whole cycle. Tied to `frameCount`
-        // directly, this counted to 36 while only `barCount` lines exist.
-        let visibleLines = 1 + Int(phase(frame) * CGFloat(barCount))
+        let progress = phase(frame) * CGFloat(barCount)
 
-        for i in 0 ..< min(visibleLines, barCount) {
-            let lineW = rect.width * lineWidths[i]
+        for i in 0 ..< barCount where progress >= CGFloat(i) {
+            let typed = min(progress - CGFloat(i), 1)
+            let fullWidth = rect.width * lineWidths[i]
+            let lineW = lineHeight + (fullWidth - lineHeight) * typed
             let lineY = text.top - CGFloat(i) * lineSpacing - lineHeight
             NSBezierPath(
                 roundedRect: NSRect(x: text.left, y: lineY, width: lineW, height: lineHeight),

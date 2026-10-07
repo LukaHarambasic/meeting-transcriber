@@ -380,6 +380,6 @@ final class VoiceEnrollmentViewTests: XCTestCase { // swiftlint:disable:this bal
             pipelineBusy: true,
         )
         let inspected = try view.inspect()
-        XCTAssertNoThrow(try inspected.find(text: "Pipeline busy — diarization may be slower."))
+        XCTAssertNoThrow(try inspected.find(text: "Pipeline busy, so diarization may be slower."))
     }
 }
