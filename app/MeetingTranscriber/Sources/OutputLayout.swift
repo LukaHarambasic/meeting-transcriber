@@ -44,4 +44,12 @@ enum OutputLayout {
     // needs a successful build log to run `unused_declaration`, and the build
     // was broken for all of them. Reinstating the behaviour means wiring the
     // read paths, not restoring these; the code is in git history.
+    //
+    // Decided 2026-10-07 not to wire them: nothing could use them any more. The
+    // working files are read only for a job still awaiting speaker names (late
+    // re-diarization needs its in-memory naming data, and a finished job leaves
+    // the queue after 60 s). A job left awaiting names across the layout change
+    // was resolved to `.done` on its first launch afterwards, because
+    // `loadSnapshot` falls back to done when the naming data is missing, and that
+    // cannot be undone. So a fallback today would be code with no caller.
 }

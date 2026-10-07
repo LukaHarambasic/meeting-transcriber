@@ -355,19 +355,23 @@ final class WorkflowIntegrationTests: XCTestCase {
         )
     }
 
-    /// Re-importing a recording from `outputDir/recordings/` used to rename the
-    /// source file in place with a fresh `<today_timestamp>_<title>` prefix,
-    /// and `recoverOrphanedRecordings` would re-pick the new name on the next
-    /// launch — endless compounding-rename loop on disk. Fix: skip the move
-    /// when the source already lives in the target directory.
-    func testWorkflowSourceFilesInOutputDirAreNotRenamed() async throws {
+    /// Audio the user picked is theirs: a finished import must leave every
+    /// source file where it was, under its own name.
+    ///
+    /// This test used to import from `<outputDir>/recordings/`, guarding a loop
+    /// in which each re-import renamed the source under a fresh timestamp and
+    /// orphan recovery picked the new name up again. That folder and the move
+    /// behind the loop are gone (4e576dc deletes the app's own staged audio and
+    /// relocates nothing), so what is left to guard is the user's side: the one
+    /// mistake here that cannot be undone is deleting their recording.
+    func testWorkflowImportedSourceFilesAreLeftInPlace() async throws {
         let (h, _) = try makeHarness(diarizeEnabled: false)
 
-        let recordingsDir = tmpDir.appendingPathComponent("recordings")
-        try FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
-        let mixURL = recordingsDir.appendingPathComponent("standup_mix.wav")
-        let appURL = recordingsDir.appendingPathComponent("standup_app.wav")
-        let micURL = recordingsDir.appendingPathComponent("standup_mic.wav")
+        let importDir = tmpDir.appendingPathComponent("user-import")
+        try FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
+        let mixURL = importDir.appendingPathComponent("standup_mix.wav")
+        let appURL = importDir.appendingPathComponent("standup_app.wav")
+        let micURL = importDir.appendingPathComponent("standup_mic.wav")
         for url in [mixURL, appURL, micURL] {
             try FileManager.default.copyItem(at: h.audioPath, to: url)
         }
@@ -388,10 +392,9 @@ final class WorkflowIntegrationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: appURL.path), "app source preserved")
         XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path), "mic source preserved")
 
-        // No prefixed copies — original filenames untouched.
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: recordingsDir.path)) ?? []
-        let extraMixes = names.filter { $0.hasSuffix("_mix.wav") && $0 != "standup_mix.wav" }
-        XCTAssertTrue(extraMixes.isEmpty, "no prefixed _mix.wav copies, found: \(extraMixes)")
+        // Original filenames untouched, and nothing added beside them.
+        let names = try FileManager.default.contentsOfDirectory(atPath: importDir.path).sorted()
+        XCTAssertEqual(names, ["standup_app.wav", "standup_mic.wav", "standup_mix.wav"])
     }
 
     // MARK: - Error Scenarios
