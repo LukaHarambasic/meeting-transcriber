@@ -40,7 +40,7 @@ final class RecordingSidecarTests: XCTestCase {
         let sidecar = makeFullSidecar()
         let dict = try encodeAsDict(sidecar)
 
-        XCTAssertEqual(dict["version"] as? Int, 2)
+        XCTAssertEqual(dict["version"] as? Int, 3)
         XCTAssertEqual(dict["title"] as? String, "Standup")
         XCTAssertEqual(dict["appName"] as? String, "Microsoft Teams")
         XCTAssertEqual(dict["participants"] as? [String], ["Alice", "Bob"])
@@ -74,6 +74,28 @@ final class RecordingSidecarTests: XCTestCase {
         XCTAssertEqual(files?["mix"] as? String, "mix.wav")
         XCTAssertNil(files?["app"], "app filename should be omitted when nil")
         XCTAssertNil(files?["mic"], "mic filename should be omitted when nil")
+        XCTAssertNil(files?["notes"], "notes filename should be omitted when nil")
+    }
+
+    /// Version 3 added `files.notes`; a recording that carried notes must name
+    /// the file so a downstream consumer can pick it up beside the WAVs.
+    func test_encode_includesNotesFilenameWhenGiven() throws {
+        let sidecar = RecordingSidecar(
+            title: "Standup",
+            appName: "Zoom",
+            startedAt: Date(timeIntervalSince1970: 1_777_000_000),
+            stoppedAt: Date(timeIntervalSince1970: 1_777_000_600),
+            participants: [],
+            micDelaySeconds: 0,
+            trigger: .manual,
+            mixFilename: "mix.wav",
+            appFilename: nil,
+            micFilename: nil,
+            notesFilename: "20260503_083000_notes.md",
+        )
+        let dict = try encodeAsDict(sidecar)
+        let files = dict["files"] as? [String: Any]
+        XCTAssertEqual(files?["notes"] as? String, "20260503_083000_notes.md")
     }
 
     func test_write_createsFileNextToBasename() throws {

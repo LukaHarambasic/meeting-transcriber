@@ -120,8 +120,10 @@ final class ResamplingIntegrationTests: XCTestCase { // swiftlint:disable:this b
         XCTAssertEqual(result?.state, .done, "pipeline error: \(result?.error ?? "nil")")
         XCTAssertTrue(protocolGen.capturedTranscript?.contains("Voice memo content") ?? false)
 
+        // The 16 kHz copy is a working file for re-diarization, so it lives in the
+        // hidden `.audio` directory, not in a `recordings/` folder.
         let persisted = try FileManager.default
-            .contentsOfDirectory(at: tmpDir.appendingPathComponent("recordings"), includingPropertiesForKeys: nil)
+            .contentsOfDirectory(at: OutputLayout.workDir(in: tmpDir), includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasSuffix("_16k.wav") }
         let audio16k = try XCTUnwrap(persisted.first, "no 16 kHz audio persisted for the import")
         let file = try AVAudioFile(forReading: audio16k)

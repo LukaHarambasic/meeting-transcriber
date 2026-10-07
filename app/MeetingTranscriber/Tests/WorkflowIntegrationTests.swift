@@ -126,6 +126,22 @@ final class WorkflowIntegrationTests: XCTestCase {
         }
     }
 
+    /// The transcript a person reads: the "Full Transcript" section of the `.md`.
+    ///
+    /// The `.txt` that used to carry it is deleted once the `.md` exists, so
+    /// `transcriptPath` is nil on every job that generated a protocol. Reading the
+    /// `.md` rather than `MockProtocolGen.capturedTranscript` keeps the assertion
+    /// on what was written to disk, which is what the dedup tests are about.
+    private func writtenTranscript(_ queue: PipelineQueue) throws -> String {
+        let path = try XCTUnwrap(queue.jobs.first?.protocolPath, "the job wrote no .md")
+        let markdown = try String(contentsOf: path, encoding: .utf8)
+        let range = try XCTUnwrap(
+            markdown.range(of: "## Full Transcript\n\n"),
+            "the .md has no Full Transcript section:\n\(markdown)",
+        )
+        return String(markdown[range.upperBound...])
+    }
+
     // MARK: - Happy Path: Single-Source, No Diarization
 
     func testWorkflowSingleSourceNoDiarization() async throws {
@@ -229,15 +245,16 @@ final class WorkflowIntegrationTests: XCTestCase {
 
     /// Reproduces the bug behind the "feat: paired import" PR's first iteration.
     /// When the picker selected only `_app.wav` + `_mic.wav` (no `_mix.wav`), the
-    /// constructed job had `mixPath == appPath`. `persistAudioToOutput`'s first
-    /// move renamed the source to `<slug>_mix.wav`; the second move silently
-    /// failed; `recoverOrphanedRecordings` re-picked the renamed file on every
-    /// launch, producing an endless compounding-rename chain on disk.
+    /// constructed job had `mixPath == appPath`. The pipeline used to relocate the
+    /// source into `recordings/`: the first move renamed it to `<slug>_mix.wav`,
+    /// the second silently failed, and `recoverOrphanedRecordings` re-picked the
+    /// renamed file on every launch, producing an endless compounding-rename chain.
     ///
-    /// This test runs the full mock pipeline through a paired triplet
-    /// (`_app + _mic + _mix`) and asserts the output dir contains a clean
-    /// triplet — no `<slug>_app_mix.wav`, `<slug>_mic_mix.wav`, or similar
-    /// aliasing artifacts.
+    /// Source audio the app made is now deleted rather than relocated, so the
+    /// shape of the guard changed with it. This test runs the full mock pipeline
+    /// through a paired triplet (`_app + _mic + _mix`) in the staging dir and
+    /// asserts the triplet is gone, nothing was written under an aliased name,
+    /// and the output folder holds the transcript at its top level.
     func testWorkflowPairedImportTripletProducesCleanOutputTriplet() async throws {
         // The triplet has to count as audio the app produced, otherwise the move
         // loop never runs and the aliasing artifacts this test looks for cannot
@@ -270,20 +287,33 @@ final class WorkflowIntegrationTests: XCTestCase {
 
         XCTAssertEqual(h.queue.jobs.first?.state, .done)
 
-        let recordingsDir = tmpDir.appendingPathComponent("recordings")
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: recordingsDir.path)) ?? []
-        let audioWAVs = names.filter { $0.hasSuffix(".wav") && !$0.contains("_16k") }
+        // The triplet sat in the staging dir, so it is audio the app made and is
+        // deleted once the transcript exists. Nothing of it may survive, under
+        // its own name or under an aliased one.
+        let leftover = (try? FileManager.default.contentsOfDirectory(atPath: importDir.path)) ?? []
+        XCTAssertEqual(leftover, [], "staged audio must be deleted after the transcript is written")
 
-        // Exactly one triplet — no aliasing artifacts.
-        XCTAssertEqual(audioWAVs.count { $0.hasSuffix(RecordingFileSuffix.mix) }, 1)
-        XCTAssertEqual(audioWAVs.count { $0.hasSuffix(RecordingFileSuffix.app) }, 1)
-        XCTAssertEqual(audioWAVs.count { $0.hasSuffix(RecordingFileSuffix.mic) }, 1)
-        for name in audioWAVs {
+        // The output folder is a folder of transcripts: no `recordings/`, and no
+        // aliasing artifact (`<slug>_app_mix.wav`, `<slug>_mic_mix.wav`) anywhere.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: tmpDir.appendingPathComponent("recordings").path),
+            "the output folder no longer has a recordings/ directory",
+        )
+        let everyFile = FileManager.default.enumerator(atPath: tmpDir.path)?.allObjects as? [String] ?? []
+        for name in everyFile {
             XCTAssertFalse(
                 name.contains("_app_mix.wav") || name.contains("_mic_mix.wav"),
-                "Aliasing artifact in output filename: \(name)",
+                "Aliasing artifact in output folder: \(name)",
             )
         }
+
+        // The transcript is the artifact, and it sits at the top level.
+        let transcript = try XCTUnwrap(h.queue.jobs.first?.protocolPath)
+        XCTAssertEqual(transcript.pathExtension, "md")
+        XCTAssertEqual(
+            transcript.deletingLastPathComponent().resolvingSymlinksInPath().path,
+            OutputLayout.transcriptsDir(in: tmpDir).resolvingSymlinksInPath().path,
+        )
     }
 
     /// app+mic without an on-disk `_mix.wav` (`mixPath: nil`) runs the dual-track
@@ -447,7 +477,8 @@ final class WorkflowIntegrationTests: XCTestCase {
 
         let finalJob = try XCTUnwrap(h.queue.jobs.first)
         XCTAssertEqual(finalJob.state, .done, "Pipeline must complete when only mic diarization fails")
-        XCTAssertNotNil(finalJob.transcriptPath)
+        // The `.md` replaces the `.txt` once it exists, so the saved transcript is `protocolPath`.
+        XCTAssertNotNil(finalJob.protocolPath)
 
         let warnings = finalJob.warnings.joined(separator: " | ")
         XCTAssertTrue(
@@ -481,8 +512,14 @@ final class WorkflowIntegrationTests: XCTestCase {
     // MARK: - Speaker Naming Scenarios
 
     func testWorkflowSpeakerNamingSkipped() async throws {
-        let (h, _) = try makeHarness(diarizeEnabled: true)
-        h.queue.speakerNamingHandler = { _ in .skipped }
+        // Opted in so the handler really runs; otherwise the job auto-skips and
+        // this passes without ever exercising a `.skipped` answer.
+        let (h, _) = try makeHarness(diarizeEnabled: true, askForSpeakerNames: true)
+        var callCount = 0
+        h.queue.speakerNamingHandler = { _ in
+            callCount += 1
+            return .skipped
+        }
 
         let job = makeJob(audioPath: h.audioPath)
         h.queue.enqueue(job)
@@ -490,12 +527,15 @@ final class WorkflowIntegrationTests: XCTestCase {
         await awaitJobTerminalState(h.queue)
 
         // Still completes even when naming is skipped
+        XCTAssertEqual(callCount, 1)
         XCTAssertEqual(h.queue.jobs.first?.state, .done)
         XCTAssertTrue(h.protocolGen.generateCalled)
     }
 
     func testWorkflowSpeakerNamingRerun() async throws {
-        let (h, _) = try makeHarness(diarizeEnabled: true)
+        // Opt in to the dialog path: with the default (`askForSpeakerNames` off,
+        // since 65da915) the job auto-skips and the handler is never called.
+        let (h, _) = try makeHarness(diarizeEnabled: true, askForSpeakerNames: true)
 
         var callCount = 0
         h.queue.speakerNamingHandler = { _ in
@@ -845,9 +885,7 @@ final class WorkflowIntegrationTests: XCTestCase {
 
         await runDualSource(h, app: pair.app, mic: pair.mic)
 
-        let transcript = try String(
-            contentsOf: XCTUnwrap(h.queue.jobs.first?.transcriptPath), encoding: .utf8,
-        )
+        let transcript = try writtenTranscript(h.queue)
         let kept = micLines(transcript)
         XCTAssertEqual(kept.count, 1, "the echoed half must not be written a second time, got:\n\(transcript)")
         XCTAssertTrue(
@@ -892,9 +930,7 @@ final class WorkflowIntegrationTests: XCTestCase {
 
         await runDualSource(h, app: pair.app, mic: pair.mic)
 
-        let transcript = try String(
-            contentsOf: XCTUnwrap(h.queue.jobs.first?.transcriptPath), encoding: .utf8,
-        )
+        let transcript = try writtenTranscript(h.queue)
         XCTAssertEqual(
             transcript.components(separatedBy: "far end talking").count - 1, 1,
             "the diarized rendering must not reintroduce the suppressed copy, got:\n\(transcript)",
@@ -911,7 +947,7 @@ final class WorkflowIntegrationTests: XCTestCase {
     /// meeting must not resurrect the suppressed copies either.
     @MainActor
     func testLateRerunKeepsTheFarEndWrittenOnce() async throws {
-        let (h, _) = try makeHarness(diarizeEnabled: true)
+        let (h, _) = try makeHarness(diarizeEnabled: true, askForSpeakerNames: true)
         configureDedupTracks(h.engine)
         var callCount = 0
         h.queue.speakerNamingHandler = { _ in
@@ -929,9 +965,7 @@ final class WorkflowIntegrationTests: XCTestCase {
         await awaitJobTerminalState(h.queue, timeout: 30)
 
         XCTAssertEqual(callCount, 2, "the rerun has to actually run the late path")
-        let transcript = try String(
-            contentsOf: XCTUnwrap(h.queue.jobs.first?.transcriptPath), encoding: .utf8,
-        )
+        let transcript = try writtenTranscript(h.queue)
         XCTAssertEqual(
             transcript.components(separatedBy: "far end talking").count - 1, 1,
             "the late rewrite must not resurrect the suppressed copy, got:\n\(transcript)",
@@ -953,9 +987,7 @@ final class WorkflowIntegrationTests: XCTestCase {
 
         await runDualSource(h, app: pair.app, mic: pair.mic)
 
-        let transcript = try String(
-            contentsOf: XCTUnwrap(h.queue.jobs.first?.transcriptPath), encoding: .utf8,
-        )
+        let transcript = try writtenTranscript(h.queue)
         XCTAssertEqual(h.queue.jobs.first?.echo?.detected, true, "the warning still fires; only the removal is off")
         XCTAssertEqual(micLines(transcript).count, 2, "with dedup off the second copy has to stay")
         XCTAssertEqual(h.queue.jobs.first?.echo?.suppressedSegments, 0)
@@ -974,9 +1006,7 @@ final class WorkflowIntegrationTests: XCTestCase {
 
         await runDualSource(h, app: pair.app, mic: pair.mic)
 
-        let transcript = try String(
-            contentsOf: XCTUnwrap(h.queue.jobs.first?.transcriptPath), encoding: .utf8,
-        )
+        let transcript = try writtenTranscript(h.queue)
         XCTAssertEqual(h.queue.jobs.first?.echo?.detected, false, "the control must be measured and found clean")
         XCTAssertEqual(micLines(transcript).count, 2, "nothing may be removed from a recording without bleed")
     }

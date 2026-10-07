@@ -119,7 +119,12 @@ final class NotesStoreTests: XCTestCase {
 
         let url = store.fileURL(for: target)
 
-        XCTAssertEqual(url.deletingLastPathComponent(), output.appendingPathComponent("notes"))
+        // Compare paths: `deletingLastPathComponent()` keeps the trailing slash a
+        // directory URL carries, while a URL built without `isDirectory` has none.
+        XCTAssertEqual(
+            url.deletingLastPathComponent().path,
+            output.appendingPathComponent("notes", isDirectory: true).path,
+        )
         XCTAssertEqual(url.pathExtension, "md")
     }
 
