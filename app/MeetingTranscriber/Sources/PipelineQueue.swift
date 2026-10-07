@@ -91,6 +91,12 @@ class PipelineQueue {
 
     let completedJobLifetime: TimeInterval
 
+    /// How long a failed job stays in the list, measured from `enqueuedAt`.
+    /// Unlike `.done` jobs a failure is not removed by a timer, so without
+    /// this a month-old failure sits in the menu forever and survives every
+    /// restart through the snapshot. Pruned lazily, see `pruneStaleErrorJobs`.
+    let errorJobLifetime: TimeInterval
+
     /// Process-wide claim on the runs currently executing, so a replacement
     /// queue cannot start a job the queue it replaced is still working on.
     /// Defaults to the shared instance; tests inject their own to stay isolated
@@ -238,6 +244,7 @@ class PipelineQueue {
         snapshotWriter: @escaping @Sendable ([PipelineJob], URL) throws -> Void = PipelineSnapshot.save,
         stageTimingLog: StageTimingLog? = nil,
         completedJobLifetime: TimeInterval = 60,
+        errorJobLifetime: TimeInterval = ErrorJobPrune.defaultLifetime,
         terminalJobStore: TerminalJobStore? = nil,
         inFlightRuns: InFlightRunRegistry? = nil,
     ) {
@@ -264,6 +271,7 @@ class PipelineQueue {
         self.recognitionStatsLog = nil
         self.stageTimingLog = stageTimingLog
         self.completedJobLifetime = completedJobLifetime
+        self.errorJobLifetime = errorJobLifetime
         self.terminalJobStore = terminalJobStore
         self.inFlightRuns = inFlightRuns ?? .shared
         naming = SpeakerNamingSession(
@@ -340,6 +348,7 @@ class PipelineQueue {
         recognitionStatsLog: RecognitionStatsLog? = nil, notesFeedToProtocol: (() -> Bool)? = nil,
         stageTimingLog: StageTimingLog? = nil,
         completedJobLifetime: TimeInterval = 60,
+        errorJobLifetime: TimeInterval = ErrorJobPrune.defaultLifetime,
         terminalJobStore: TerminalJobStore? = nil,
         inFlightRuns: InFlightRunRegistry? = nil,
     ) {
@@ -372,6 +381,7 @@ class PipelineQueue {
         self.notesFeedToProtocol = notesFeedToProtocol
         self.stageTimingLog = stageTimingLog
         self.completedJobLifetime = completedJobLifetime
+        self.errorJobLifetime = errorJobLifetime
         self.terminalJobStore = terminalJobStore
         self.inFlightRuns = inFlightRuns ?? .shared
         naming = SpeakerNamingSession(
@@ -414,6 +424,7 @@ class PipelineQueue {
         jobs.append(job)
         eventLog.append(jobID: job.id, event: "enqueued", from: nil, to: job.state)
         saveSnapshot()
+        pruneStaleErrorJobs(keeping: job.id)
         logger.info("Enqueued job: \(job.meetingTitle, privacy: .private) (\(job.id))")
         triggerProcessing()
     }
@@ -526,6 +537,7 @@ class PipelineQueue {
         if newState == .done || newState == .error {
             processedLedger.markProcessed(mixPath: jobs[index].mixPath)
             recordTerminalJob(jobs[index])
+            pruneStaleErrorJobs(keeping: id)
         }
         if newState == .done {
             Task { [weak self] in

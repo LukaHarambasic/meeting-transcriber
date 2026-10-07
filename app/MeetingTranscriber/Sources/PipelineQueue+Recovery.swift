@@ -69,6 +69,7 @@ extension PipelineQueue {
         }
 
         jobs = loaded
+        pruneStaleErrorJobs()
 
         // Rebuild the session's naming cache from disk for
         // .speakerNamingPending jobs.
@@ -85,13 +86,42 @@ extension PipelineQueue {
 
         saveSnapshot()
         cleanupStalePending()
-        logger.info("Restored \(loaded.count) jobs from snapshot")
+        logger.info("Restored \(self.jobs.count) jobs from snapshot")
         triggerProcessing()
         // Auto-popup the naming dialog if any restored job is still
         // waiting for confirmation. Same notification as the in-pipeline
         // pop, so MeetingTranscriberApp brings the window forward.
         if !pendingSpeakerNamingJobs.isEmpty {
             NotificationCenter.default.post(name: .showSpeakerNaming, object: nil)
+        }
+    }
+
+    // MARK: - Failed-job expiry
+
+    /// Drop failed jobs older than `errorJobLifetime` from the list.
+    ///
+    /// Runs when the snapshot is loaded and whenever a job is enqueued or
+    /// reaches a terminal state, so a long-running app sheds them too without
+    /// a timer per job. `keeping` exempts the job whose event triggered the
+    /// pass: one that fails right now must be seen even if it waited a day.
+    ///
+    /// Goes through `removeJob`, so the snapshot, the ledger and any naming
+    /// data are handled as for any other removal. Audio is never touched. The
+    /// durable record of the outcome is the `TerminalJobStore` entry (the
+    /// automation API reads that, not this list); one is written here when a
+    /// failure from before the store existed has none, so removal loses nothing.
+    func pruneStaleErrorJobs(now: Date = Date(), keeping keptID: UUID? = nil) {
+        let stale = jobs.filter { job in
+            job.id != keptID && ErrorJobPrune.isStale(
+                state: job.state, enqueuedAt: job.enqueuedAt, now: now, lifetime: errorJobLifetime,
+            )
+        }
+        for job in stale {
+            if let store = terminalJobStore, store.lookup(jobID: job.id) == nil {
+                store.record(JobStatusDTO(job: job))
+            }
+            logger.info("Dropping failed job older than \(self.errorJobLifetime, privacy: .public)s: \(job.id)")
+            removeJob(id: job.id)
         }
     }
 
@@ -172,5 +202,18 @@ extension PipelineQueue {
         saveSnapshot()
         logger.info("Recovered \(candidates.count) orphaned recording(s)")
         triggerProcessing()
+    }
+}
+
+/// The pure rule behind `PipelineQueue.pruneStaleErrorJobs`.
+enum ErrorJobPrune {
+    /// 24 hours.
+    static let defaultLifetime: TimeInterval = 86400
+
+    /// A failed job is stale once `lifetime` has passed since it was enqueued.
+    /// Only `.error` ever qualifies: a waiting or running job is never hidden
+    /// because it is old, and a done job has its own timer.
+    static func isStale(state: JobState, enqueuedAt: Date, now: Date, lifetime: TimeInterval) -> Bool {
+        state == .error && now.timeIntervalSince(enqueuedAt) > lifetime
     }
 }
