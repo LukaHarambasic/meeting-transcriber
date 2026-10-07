@@ -1174,14 +1174,16 @@ final class PipelineQueueTests: XCTestCase {
         )
     }
 
-    /// Two runs that both reach the end now both try to relocate the same
-    /// staging audio. The relocation deletes an existing destination before
-    /// moving onto it, and the policy that picks `.delete` only looks at path
-    /// shape, never at whether the source still exists. So the second finisher
-    /// deletes the recording the first one persisted and then fails its move
-    /// into a swallowed warning, leaving no copy anywhere: staging was emptied
-    /// by the first run, because audio is moved out of it, not copied.
-    func testSecondFinishingRunDoesNotDeleteThePersistedRecording() async throws {
+    /// Two runs of the same job both reach the end and both discard the staged
+    /// audio. The first finisher deletes it; the second then finds it already
+    /// gone, which must be success rather than a failed job, and nothing may be
+    /// written into a `recordings` folder (audio used to be relocated there).
+    ///
+    /// Everything that can throw runs before the first run is started, and the
+    /// checks after it are non-throwing: the run is an `async let`, which is
+    /// awaited on the way out of the scope, so an early exit while the engine is
+    /// parked used to hang the whole suite instead of failing this test.
+    func testSecondFinishingRunFindsTheStagedAudioAlreadyDiscarded() async throws {
         let stagingDir = tmpDir.appendingPathComponent("staging")
         let sharedOutputDir = tmpDir.appendingPathComponent("shared-output")
         for dir in [stagingDir, sharedOutputDir] {
@@ -1202,7 +1204,7 @@ final class PipelineQueueTests: XCTestCase {
             outputDir: sharedOutputDir, stagingDir: stagingDir,
         )
 
-        // Source inside the staging dir, so the persistence policy relocates it.
+        // Source inside the staging dir, so the policy treats it as the app's own.
         let stagedAudio = stagingDir.appendingPathComponent("meeting_mix.wav")
         let sourceAudio = try createTestAudioFile(in: tmpDir)
         try FileManager.default.copyItem(at: sourceAudio, to: stagedAudio)
@@ -1214,27 +1216,29 @@ final class PipelineQueueTests: XCTestCase {
         )
         first.insertJobForTesting(job)
         second.insertJobForTesting(job)
+        let recordingsDir = sharedOutputDir.appendingPathComponent("recordings")
 
         async let firstRun: Void = first.processNext()
         await waitFor(parked.isParked, timeout: .seconds(5))
-        // The second run finishes first and relocates the audio.
+        // The second run finishes first and discards the staged audio.
         await second.processNext()
-        let recordingsDir = sharedOutputDir.appendingPathComponent("recordings")
-        let persisted = try FileManager.default
-            .contentsOfDirectory(atPath: recordingsDir.path)
-            .filter { $0.hasSuffix(RecordingFileSuffix.mix) }
-        XCTAssertEqual(persisted.count, 1, "second run did not persist the recording")
+        XCTAssertEqual(second.jobs.first?.state, .done, "second run: \(second.jobs.first?.error ?? "no error recorded")")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: stagedAudio.path),
+            "a finished run must delete the audio the app recorded",
+        )
 
         // Now let the first run finish on top of it.
         parked.release()
         await firstRun
 
-        let survivors = try FileManager.default
-            .contentsOfDirectory(atPath: recordingsDir.path)
-            .filter { $0.hasSuffix(RecordingFileSuffix.mix) }
-        XCTAssertEqual(
-            survivors, persisted,
-            "the finished run deleted the recording the other run had already persisted",
+        XCTAssertNotEqual(
+            first.jobs.first?.state, .error,
+            "the staged audio was already gone, which is success: \(first.jobs.first?.error ?? "no error recorded")",
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: recordingsDir.path),
+            "audio is deleted now, never relocated into a recordings folder",
         )
     }
 
@@ -1836,16 +1840,19 @@ final class PipelineQueueTests: XCTestCase {
         )
     }
 
-    /// Transcript, protocol, and both audio artifacts of one job must all land on
-    /// the identical stem, stamped with the meeting-start time and carrying the
-    /// job shortID. Fails against the old code, which stamped each save with a
-    /// fresh `Date()` (processing time) and omitted the shortID from the
-    /// transcript/protocol/mix names.
+    /// The transcript and the 16 kHz working file of one job must land on the
+    /// identical stem, stamped with the meeting-start time and carrying the job
+    /// shortID, and the audio the app recorded must be gone once the transcript
+    /// exists. Fails against the old code, which stamped each save with a fresh
+    /// `Date()` (processing time) and omitted the shortID from the names.
+    ///
+    /// Also the suite's coverage of the two end-of-job steps that used to fail
+    /// without a sound: the hidden working directory is never created anywhere
+    /// else (so its sidecars silently vanished), and a staged recording read as
+    /// already at its destination (so it was never deleted).
     func testAllArtifactsShareOneMeetingStartAnchoredBasename() async throws {
         // Staging == tmpDir, so the fixture counts as audio the app produced and
-        // the hand-off into the output dir runs. That is what pins the shared
-        // stem on the moved `_mix.wav`, and it is the suite's only coverage of
-        // the move branch.
+        // the end-of-job discard runs.
         let (q, protocolGen) = makeStraightThroughQueue(stagingDir: tmpDir)
         let start = try localDate(2026, 3, 4, 9, 15)
         let audioPath = try createTestAudioFile(in: tmpDir)
@@ -1858,24 +1865,19 @@ final class PipelineQueueTests: XCTestCase {
         await q.processNext()
 
         let stem = "20260304_0915_weekly_sync_\(job.shortID)"
-        let protocolsDir = tmpDir.appendingPathComponent("protocols")
-        let recordingsDir = tmpDir.appendingPathComponent("recordings")
+        let workDir = OutputLayout.workDir(in: tmpDir)
         let fm = FileManager.default
         XCTAssertTrue(
-            fm.fileExists(atPath: protocolsDir.appendingPathComponent("\(stem).txt").path),
-            "transcript must use the meeting-start + shortID basename",
+            fm.fileExists(atPath: OutputLayout.transcriptsDir(in: tmpDir).appendingPathComponent("\(stem).md").path),
+            "protocol must use the meeting-start + shortID basename",
         )
         XCTAssertTrue(
-            fm.fileExists(atPath: protocolsDir.appendingPathComponent("\(stem).md").path),
-            "protocol must share the same basename",
+            fm.fileExists(atPath: workDir.appendingPathComponent("\(stem)_16k.wav").path),
+            "16k audio must share the same basename, in the hidden working directory",
         )
-        XCTAssertTrue(
-            fm.fileExists(atPath: recordingsDir.appendingPathComponent("\(stem)_mix.wav").path),
-            "mix audio must share the same basename",
-        )
-        XCTAssertTrue(
-            fm.fileExists(atPath: recordingsDir.appendingPathComponent("\(stem)_16k.wav").path),
-            "16k audio must share the same basename",
+        XCTAssertFalse(
+            fm.fileExists(atPath: audioPath.path),
+            "the audio the app recorded must be deleted once its transcript exists",
         )
         XCTAssertEqual(protocolGen.capturedMeetingStartTime, start)
     }

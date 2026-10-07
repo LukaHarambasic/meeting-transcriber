@@ -639,7 +639,12 @@ extension PipelineQueue {
         }
 
         let recordingsDir = OutputLayout.workDir(in: outputDir)
-        Self.discardAppProducedAudio(ctx: ctx, stagingDir: stagingDir)
+        // The hidden working directory is created nowhere else, and every move
+        // and write below is `try?`: without this a missing directory costs the
+        // 16 kHz sidecars and cached segments silently, which is what late
+        // re-diarization and speaker naming read back later.
+        try? FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+        Self.discardAppProducedAudio(ctx: ctx, stagingDir: stagingDir, workDir: recordingsDir)
 
         // --- Persist 16kHz audio for re-diarization (move instead of copy to avoid double I/O) ---
         try? FileManager.default.moveItem(
@@ -923,10 +928,6 @@ extension PipelineQueue {
 
     // MARK: - Audio File Copy
 
-    /// Hand the app's own staging recordings over to the protocol output
-    /// directory, per `AudioPersistencePolicy`. Nil `mixPath` (paired imports
-    /// without a `_mix.wav` source) → mix slot is skipped, no persistent mix is
-    /// written.
     /// Delete the source audio this app recorded, now that its transcript
     /// exists.
     ///
@@ -939,18 +940,20 @@ extension PipelineQueue {
     /// `.leaveInPlace`, because deleting someone's own recording is not a
     /// decision a transcription run gets to make — and it is the one mistake
     /// here that cannot be undone.
-    private static func discardAppProducedAudio(ctx: JobContext, stagingDir: URL) {
+    private static func discardAppProducedAudio(ctx: JobContext, stagingDir: URL, workDir: URL) {
         let fm = FileManager.default
         let sources = [ctx.mixPath, ctx.appPath, ctx.micPath].compactMap(\.self)
         for src in sources {
+            // The destination is the working directory, never the staging
+            // directory. Passing staging for both made every staged file read as
+            // `.alreadyAtDestination` (that check runs first), so nothing the
+            // app recorded was ever deleted.
             switch AudioPersistencePolicy.action(
-                source: src, stagingDir: stagingDir, destinationDir: stagingDir,
+                source: src, stagingDir: stagingDir, destinationDir: workDir,
             ) {
             case .leaveInPlace, .alreadyAtDestination:
-                // `.alreadyAtDestination` is unreachable now that destination
-                // and staging are the same directory, and it is kept only
-                // because the enum is exhaustive here. Either way the answer is
-                // the same: not ours, do not touch it.
+                // Not ours, or already where the app keeps its own working
+                // files: either way, do not touch it.
                 logger.info("Audio left in place: \(src.lastPathComponent, privacy: .private)")
                 continue
 
