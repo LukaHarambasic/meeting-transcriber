@@ -178,9 +178,16 @@
 
         // MARK: - drainStreamJSONLines
 
+        /// Drain `buffer` and discard the failure tracking, for tests that only
+        /// look at the text fragments.
+        private func drain(_ buffer: inout Data) -> [String] {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            return ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer, failure: &failure)
+        }
+
         func testDrainStreamJSONLinesEmptyBufferReturnsNothing() {
             var buffer = Data()
-            XCTAssertEqual(ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer), [])
+            XCTAssertEqual(drain(&buffer), [])
             XCTAssertEqual(buffer, Data())
         }
 
@@ -189,7 +196,7 @@
             // for the next chunk to complete it.
             let original = Data(#"{"type":"content_block_delta""#.utf8)
             var buffer = original
-            let fragments = ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer)
+            let fragments = drain(&buffer)
             XCTAssertEqual(fragments, [])
             XCTAssertEqual(buffer, original)
         }
@@ -212,7 +219,7 @@
                 [#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}"#],
                 trailingNewline: true,
             )
-            let fragments = ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer)
+            let fragments = drain(&buffer)
             XCTAssertEqual(fragments, ["Hi"])
             XCTAssertEqual(buffer, Data())
         }
@@ -226,7 +233,7 @@
                 trailingNewline: true,
             )
             XCTAssertEqual(
-                ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer),
+                drain(&buffer),
                 ["A", "B"],
             )
             XCTAssertEqual(buffer, Data())
@@ -238,7 +245,7 @@
                 [#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Done"}}"#, partial],
                 trailingNewline: false,
             )
-            let fragments = ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer)
+            let fragments = drain(&buffer)
             XCTAssertEqual(fragments, ["Done"])
             XCTAssertEqual(buffer, Data(partial.utf8))
         }
@@ -255,7 +262,7 @@
                 trailingNewline: true,
             )
             XCTAssertEqual(
-                ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer),
+                drain(&buffer),
                 ["OK"],
             )
         }
@@ -271,7 +278,7 @@
                 trailingNewline: true,
             )
             XCTAssertEqual(
-                ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer),
+                drain(&buffer),
                 ["After"],
             )
         }
@@ -281,12 +288,12 @@
             // a partial line; the second chunk supplies the rest plus a
             // following complete line.
             var buffer = Data(#"{"type":"content_block_delta","delta":{"type":"text_delta","tex"#.utf8)
-            XCTAssertEqual(ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer), [])
+            XCTAssertEqual(drain(&buffer), [])
 
             buffer.append(contentsOf: #"t":"Hello"}}"#.utf8)
             buffer.append(0x0A)
             XCTAssertEqual(
-                ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer),
+                drain(&buffer),
                 ["Hello"],
             )
             XCTAssertEqual(buffer, Data())
@@ -335,7 +342,222 @@
             XCTAssertEqual(stderr, "")
         }
 
+        /// Writes a temporary executable `#!/bin/sh` script wrapping `body` and
+        /// returns its absolute path. Caller deletes it.
+        private static func makeFakeClaudeScript(body: String) throws -> String {
+            let path = NSTemporaryDirectory() + "fake-claude-\(UUID().uuidString).sh"
+            try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: path,
+            )
+            return path
+        }
+    }
+
+    // MARK: - Failure reporting
+
+    extension ClaudeCLIProtocolGeneratorTests {
+        // MARK: - StreamFailure
+
+        /// The real line shape the CLI prints when its OAuth session has expired.
+        private static let authResultLine = #"""
+        {"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}
+        """#
+        private static let authAssistantLine = #"""
+        {"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate"}]},"error":"authentication_failed"}
+        """#
+
+        func testStreamFailureCapturesResultTextAndAuthFromRealLine() {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            failure.absorb(line: Self.authResultLine)
+            XCTAssertTrue(failure.isError)
+            XCTAssertTrue(failure.isAuthentication)
+            XCTAssertEqual(failure.message, "Failed to authenticate: OAuth session expired and could not be refreshed")
+        }
+
+        func testStreamFailureAssistantAuthenticationFailedFlagsAuthWithoutMessage() {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            failure.absorb(line: Self.authAssistantLine)
+            XCTAssertTrue(failure.isError)
+            XCTAssertTrue(failure.isAuthentication)
+            XCTAssertNil(failure.message)
+        }
+
+        func testStreamFailureNonAuthErrorKeepsMessageButIsNotAuth() {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            failure.absorb(line: #"{"type":"result","is_error":true,"result":"Prompt is too long"}"#)
+            XCTAssertTrue(failure.isError)
+            XCTAssertFalse(failure.isAuthentication)
+            XCTAssertEqual(failure.message, "Prompt is too long")
+        }
+
+        func testStreamFailureIgnoresSuccessfulResultAndPlainLines() {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            failure.absorb(line: #"{"type":"result","is_error":false,"result":"Please log in to see more"}"#)
+            failure.absorb(line: #"{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}"#)
+            failure.absorb(line: "not json")
+            XCTAssertEqual(failure, ClaudeCLIProtocolGenerator.StreamFailure())
+        }
+
+        func testStreamFailureAuthTextMatchesEachKeyword() {
+            for text in ["could not authenticate", "OAuth token revoked", "Please log in again", "Login required"] {
+                XCTAssertTrue(ClaudeCLIProtocolGenerator.StreamFailure.looksLikeAuthFailure(text), text)
+            }
+            XCTAssertFalse(ClaudeCLIProtocolGenerator.StreamFailure.looksLikeAuthFailure("Prompt is too long"))
+        }
+
+        func testDrainStreamJSONLinesFoldsErrorLinesIntoFailure() {
+            var buffer = makeBuffer([Self.authAssistantLine, Self.authResultLine], trailingNewline: true)
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            let fragments = ClaudeCLIProtocolGenerator.drainStreamJSONLines(buffer: &buffer, failure: &failure)
+            // The assistant line still yields its text; the failure is what
+            // stops it being saved as a protocol.
+            XCTAssertEqual(fragments, ["Failed to authenticate"])
+            XCTAssertTrue(failure.isAuthentication)
+            XCTAssertEqual(failure.message?.hasPrefix("Failed to authenticate: OAuth"), true)
+        }
+
+        func testMakeFailureErrorUsesStreamResultWhenStderrEmpty() {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            failure.absorb(line: #"{"type":"result","is_error":true,"result":"Prompt is too long"}"#)
+            let err = ClaudeCLIProtocolGenerator.makeFailureError(
+                exitCode: 1, stderrText: "", streamFailure: failure,
+            )
+            guard case let .cliFailed(code, detail) = err else {
+                XCTFail("Expected .cliFailed, got \(err)")
+                return
+            }
+            XCTAssertEqual(code, 1)
+            XCTAssertEqual(detail, "Prompt is too long")
+        }
+
+        func testMakeFailureErrorPrefersStderrOverStreamResult() {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            failure.absorb(line: #"{"type":"result","is_error":true,"result":"from stdout"}"#)
+            let err = ClaudeCLIProtocolGenerator.makeFailureError(
+                exitCode: 1, stderrText: "from stderr", streamFailure: failure,
+            )
+            guard case let .cliFailed(_, detail) = err else {
+                XCTFail("Expected .cliFailed, got \(err)")
+                return
+            }
+            XCTAssertEqual(detail, "from stderr")
+        }
+
+        func testMakeFailureErrorMapsAuthenticationToNotSignedIn() {
+            var failure = ClaudeCLIProtocolGenerator.StreamFailure()
+            failure.absorb(line: Self.authResultLine)
+            let err = ClaudeCLIProtocolGenerator.makeFailureError(
+                exitCode: 1, stderrText: "", streamFailure: failure,
+            )
+            guard case .cliNotSignedIn = err else {
+                XCTFail("Expected .cliNotSignedIn, got \(err)")
+                return
+            }
+            XCTAssertEqual(
+                err.errorDescription, "Claude CLI is not signed in. Run claude in Terminal and log in.",
+            )
+        }
+
         // MARK: - generate (subprocess integration)
+
+        /// The reproduced failure end to end: the CLI exits 1 with EMPTY stderr
+        /// and says why only in the stream-json lines on stdout.
+        func testGenerateExpiredSessionThrowsNotSignedIn() async throws {
+            let script = try Self.makeFakeClaudeScript(
+                body: """
+                cat > /dev/null
+                printf '%s\\n' '\(Self.authAssistantLine)'
+                printf '%s\\n' '\(Self.authResultLine)'
+                exit 1
+                """,
+            )
+            defer { try? FileManager.default.removeItem(atPath: script) }
+
+            let generator = ClaudeCLIProtocolGenerator(claudeBin: script, language: "English")
+            do {
+                _ = try await generator.generate(transcript: "hi", title: "Sync", diarized: false)
+                XCTFail("Expected generate to throw")
+            } catch let error as ProtocolError {
+                guard case .cliNotSignedIn = error else {
+                    XCTFail("Expected .cliNotSignedIn, got \(error)")
+                    return
+                }
+            }
+        }
+
+        func testGenerateNonAuthFailureCarriesStreamResultText() async throws {
+            let script = try Self.makeFakeClaudeScript(
+                body: """
+                cat > /dev/null
+                printf '%s\\n' '{"type":"result","is_error":true,"result":"Prompt is too long"}'
+                exit 1
+                """,
+            )
+            defer { try? FileManager.default.removeItem(atPath: script) }
+
+            let generator = ClaudeCLIProtocolGenerator(claudeBin: script, language: "English")
+            do {
+                _ = try await generator.generate(transcript: "hi", title: "Sync", diarized: false)
+                XCTFail("Expected generate to throw")
+            } catch let error as ProtocolError {
+                guard case let .cliFailed(code, detail) = error else {
+                    XCTFail("Expected .cliFailed, got \(error)")
+                    return
+                }
+                XCTAssertEqual(code, 1)
+                XCTAssertEqual(detail, "Prompt is too long")
+            }
+        }
+
+        /// An error line must win even on exit 0, or its text would be saved
+        /// as the protocol.
+        func testGenerateErrorResultOnExitZeroStillThrows() async throws {
+            let script = try Self.makeFakeClaudeScript(
+                body: """
+                cat > /dev/null
+                printf '%s\\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Prompt is too long"}]}}'
+                printf '%s\\n' '{"type":"result","is_error":true,"result":"Prompt is too long"}'
+                """,
+            )
+            defer { try? FileManager.default.removeItem(atPath: script) }
+
+            let generator = ClaudeCLIProtocolGenerator(claudeBin: script, language: "English")
+            do {
+                let text = try await generator.generate(transcript: "hi", title: "Sync", diarized: false)
+                XCTFail("Expected generate to throw, got \(text)")
+            } catch is ProtocolError {}
+        }
+
+        // MARK: - ProtocolError job warning
+
+        func testJobWarningForNotSignedInIsShortAndActionable() {
+            XCTAssertEqual(
+                ProtocolError.jobWarning(for: ProtocolError.cliNotSignedIn),
+                "Protocol failed: Claude CLI is not signed in",
+            )
+        }
+
+        func testJobWarningForCLIFailureCarriesDetail() {
+            XCTAssertEqual(
+                ProtocolError.jobWarning(for: ProtocolError.cliFailed(1, "Prompt is too long")),
+                "Protocol failed: Prompt is too long; transcript saved",
+            )
+        }
+
+        func testJobWarningForCLIFailureWithoutDetailNamesExitCode() {
+            XCTAssertEqual(
+                ProtocolError.jobWarning(for: ProtocolError.cliFailed(2, "")),
+                "Protocol failed: Claude CLI exited with code 2; transcript saved",
+            )
+        }
+
+        func testShortReasonTruncatesToFirstLineWithEllipsis() {
+            XCTAssertEqual(ProtocolError.cliFailed(1, "first line\nsecond line").shortReason, "first line")
+            let truncated = ProtocolError.cliFailed(1, String(repeating: "x", count: 200)).shortReason
+            XCTAssertEqual(truncated.count, ProtocolError.shortReasonLimit)
+            XCTAssertTrue(truncated.hasSuffix("..."))
+        }
 
         /// Drives the full `generate()` path against a fake `claude` binary that
         /// reads the piped prompt and replies with a stream-json line. Exercises
@@ -359,17 +581,6 @@
                 transcript: "Speaker 1: hello", title: "Sync", diarized: false,
             )
             XCTAssertEqual(result, "Protocol body")
-        }
-
-        /// Writes a temporary executable `#!/bin/sh` script wrapping `body` and
-        /// returns its absolute path. Caller deletes it.
-        private static func makeFakeClaudeScript(body: String) throws -> String {
-            let path = NSTemporaryDirectory() + "fake-claude-\(UUID().uuidString).sh"
-            try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o755], ofItemAtPath: path,
-            )
-            return path
         }
     }
 #endif

@@ -128,7 +128,7 @@ final class ProtocolNotesTests: XCTestCase {
             jobID: job.id, transcript: "[SPEAKER_0] hi", title: job.meetingTitle, protocolsDir: protocolsDir,
         )
 
-        XCTAssertEqual(queue.jobs.first?.warnings, ["Transcript generation failed; raw text saved"])
+        XCTAssertEqual(queue.jobs.first?.warnings, ["Protocol failed: Mock protocol error; transcript saved"])
         let mdPath = try XCTUnwrap(
             queue.jobs.first?.protocolPath,
             "a failed LLM call must not drop the user's notes",
@@ -139,6 +139,37 @@ final class ProtocolNotesTests: XCTestCase {
             "verbatim notes missing from the generation-failure fallback: \(saved)",
         )
     }
+
+    /// The menu shows the job warning, so the reason the generator gave has to
+    /// reach it: a sign-in failure must read as one, not as a generic failure.
+    func testGeneratorFailureReasonReachesTheJobWarning() async {
+        let queue = makeQueue(protocolGen: FailingProtocolGen(error: ProtocolError.connectionFailed("host unreachable")))
+        let job = makeJobWithNotes(nil)
+        queue.insertJobForTesting(job)
+
+        await queue.generateProtocol(
+            jobID: job.id, transcript: "[SPEAKER_0] hi", title: job.meetingTitle, protocolsDir: protocolsDir,
+        )
+
+        XCTAssertEqual(
+            queue.jobs.first?.warnings,
+            ["Protocol failed: Connection failed: host unreachable; transcript saved"],
+        )
+    }
+
+    #if !APPSTORE
+        func testNotSignedInReasonReachesTheJobWarning() async {
+            let queue = makeQueue(protocolGen: FailingProtocolGen(error: ProtocolError.cliNotSignedIn))
+            let job = makeJobWithNotes(nil)
+            queue.insertJobForTesting(job)
+
+            await queue.generateProtocol(
+                jobID: job.id, transcript: "[SPEAKER_0] hi", title: job.meetingTitle, protocolsDir: protocolsDir,
+            )
+
+            XCTAssertEqual(queue.jobs.first?.warnings, ["Protocol failed: Claude CLI is not signed in"])
+        }
+    #endif
 
     /// A job with no notes at all must not gain a `.md` from the no-generator
     /// path — pins the guard that keeps this feature a no-op for every job
@@ -153,5 +184,16 @@ final class ProtocolNotesTests: XCTestCase {
         )
 
         XCTAssertNil(queue.jobs.first?.protocolPath, "no notes and no generator must produce no .md at all")
+    }
+}
+
+/// Throws a fixed error, so a test can pick the failure the pipeline sees.
+private struct FailingProtocolGen: ProtocolGenerating {
+    let error: any Error
+
+    func generate(
+        transcript _: String, title _: String, diarized _: Bool, meetingStartTime _: Date?, notes _: String?,
+    ) throws -> String {
+        throw error
     }
 }

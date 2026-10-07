@@ -295,6 +295,7 @@ enum ProtocolError: LocalizedError {
     #if !APPSTORE
         case cliNotFound(String)
         case cliFailed(Int, String)
+        case cliNotSignedIn
         case timeout
     #endif
     case emptyProtocol
@@ -310,6 +311,8 @@ enum ProtocolError: LocalizedError {
 
             case let .cliFailed(code, stderr): "Claude CLI exited with code \(code)\(stderr.isEmpty ? "" : ": \(stderr)")"
 
+            case .cliNotSignedIn: "Claude CLI is not signed in. Run claude in Terminal and log in."
+
             case .timeout: "Claude CLI took too long (>10 min)"
         #endif
 
@@ -323,5 +326,45 @@ enum ProtocolError: LocalizedError {
 
         case .protocolTruncated: "Protocol was cut off before finishing (model hit its output/context limit). Raise the limit or shorten the transcript."
         }
+    }
+}
+
+extension ProtocolError {
+    /// Longest reason the job warning carries. The menu row truncates anyway;
+    /// this keeps the stored warning from holding a pasted CLI error page.
+    static let shortReasonLimit = 80
+
+    /// One short line saying why generation failed, for the job warning.
+    var shortReason: String {
+        #if !APPSTORE
+            switch self {
+            case .cliNotSignedIn: return "Claude CLI is not signed in"
+
+            case let .cliFailed(code, detail) where detail.isEmpty: return "Claude CLI exited with code \(code)"
+
+            case let .cliFailed(_, detail): return Self.shorten(detail)
+
+            default: break
+            }
+        #endif
+        return Self.shorten(errorDescription ?? "unknown error")
+    }
+
+    /// First line of `text`, cut to `shortReasonLimit` characters with an ellipsis.
+    static func shorten(_ text: String) -> String {
+        let firstLine = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        let trimmed = firstLine.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count > shortReasonLimit else { return trimmed }
+        return String(trimmed.prefix(shortReasonLimit - 3)) + "..."
+    }
+
+    /// The job warning for a failed generation. Authentication gets no
+    /// "transcript saved" tail: the sign-in message is the whole point.
+    static func jobWarning(for error: any Error) -> String {
+        let reason = (error as? ProtocolError)?.shortReason ?? shorten(error.localizedDescription)
+        #if !APPSTORE
+            if case .cliNotSignedIn? = error as? ProtocolError { return "Protocol failed: \(reason)" }
+        #endif
+        return "Protocol failed: \(reason); transcript saved"
     }
 }

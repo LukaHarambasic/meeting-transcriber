@@ -98,7 +98,7 @@
             }
 
             // Read stream-json output concurrently with stdin write
-            let text = try await Self.readStreamJSON(from: stdoutPipe, process: process)
+            let (text, streamFailure) = try await Self.readStreamJSON(from: stdoutPipe, process: process)
 
             // Ensure stdin write completes (should be done by now)
             _ = await stdinWriteTask.value
@@ -113,23 +113,45 @@
                 break
             }
 
-            if process.terminationStatus != 0 {
+            // A reported error counts even on exit 0: the CLI can print its
+            // failure text as an ordinary assistant message, which would
+            // otherwise be saved as the protocol.
+            if process.terminationStatus != 0 || streamFailure.isError {
                 let stderrData = await stderrRead
-                let stderrText = String(data: stderrData, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                logger.error(
-                    "claude_cli_failed exit=\(process.terminationStatus, privacy: .public) stderr=\(stderrText, privacy: .public)",
+                throw Self.logAndMakeFailure(
+                    exitCode: process.terminationStatus, stderrData: stderrData, streamFailure: streamFailure,
                 )
-                throw Self.makeFailureError(exitCode: process.terminationStatus, stderrText: stderrText)
             }
 
             return try Self.validateGeneratedText(text)
         }
 
-        /// Pair an already-decoded stderr string with `exitCode` as a
-        /// `ProtocolError.cliFailed`.
-        static func makeFailureError(exitCode: Int32, stderrText: String) -> ProtocolError {
-            .cliFailed(Int(exitCode), stderrText)
+        /// Log a failed run and turn it into the error to throw.
+        private static func logAndMakeFailure(
+            exitCode: Int32, stderrData: Data, streamFailure: StreamFailure,
+        ) -> ProtocolError {
+            let stderrText = String(data: stderrData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let streamReason = streamFailure.message ?? ""
+            logger.error(
+                "claude_cli_failed exit=\(exitCode, privacy: .public) stderr=\(stderrText, privacy: .public) result=\(streamReason, privacy: .public) auth=\(streamFailure.isAuthentication, privacy: .public)",
+            )
+            return makeFailureError(exitCode: exitCode, stderrText: stderrText, streamFailure: streamFailure)
+        }
+
+        /// Turn a failed run into a `ProtocolError`. An authentication failure
+        /// becomes `.cliNotSignedIn`, because the fix (sign in) is not
+        /// something a CLI exit code or raw stderr tells the user. Otherwise the
+        /// detail is stderr, falling back to the stream's `result` text: the
+        /// CLI exits 1 with EMPTY stderr and puts the reason on stdout.
+        static func makeFailureError(
+            exitCode: Int32,
+            stderrText: String,
+            streamFailure: StreamFailure = StreamFailure(),
+        ) -> ProtocolError {
+            if streamFailure.isAuthentication { return .cliNotSignedIn }
+            let detail = stderrText.isEmpty ? (streamFailure.message ?? "") : stderrText
+            return .cliFailed(Int(exitCode), detail)
         }
 
         /// Trim whitespace from CLI output. Throws `.emptyProtocol` when
@@ -142,10 +164,52 @@
 
         // MARK: - Stream JSON
 
-        /// Parse Claude CLI stream-json output and accumulate text.
-        private static func readStreamJSON(from pipe: Pipe, process: Process) async throws -> String {
+        /// What the stream said about a failed run. The CLI reports its reason
+        /// on stdout, as a `result` line with `is_error: true` (and, for a
+        /// sign-in problem, an earlier assistant line with
+        /// `"error":"authentication_failed"`), not on stderr.
+        struct StreamFailure: Equatable {
+            /// The `result` text of an `is_error` result line.
+            var message: String?
+            var isAuthentication = false
+            var isError = false
+
+            /// Fold one stream-json line in. Lines that carry no error are ignored.
+            mutating func absorb(line: String) {
+                guard let data = line.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return
+                }
+                let type = obj["type"] as? String
+                if type == "assistant", obj["error"] as? String == "authentication_failed" {
+                    isError = true
+                    isAuthentication = true
+                }
+                if type == "result", obj["is_error"] as? Bool == true {
+                    isError = true
+                    let text = (obj["result"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if !text.isEmpty {
+                        message = text
+                        if Self.looksLikeAuthFailure(text) { isAuthentication = true }
+                    }
+                }
+            }
+
+            /// Whether an error text is the CLI saying it is not signed in.
+            static func looksLikeAuthFailure(_ text: String) -> Bool {
+                let lowered = text.lowercased()
+                return ["authenticate", "oauth", "log in", "login"].contains { lowered.contains($0) }
+            }
+        }
+
+        /// Parse Claude CLI stream-json output and accumulate text and failure info.
+        private static func readStreamJSON(
+            from pipe: Pipe, process: Process,
+        ) async throws -> (text: String, failure: StreamFailure) {
             let handle = pipe.fileHandleForReading
             var parts: [String] = []
+            var failure = StreamFailure()
             let startTime = ProcessInfo.processInfo.systemUptime
 
             // Read line-by-line from stdout
@@ -168,22 +232,22 @@
                 if chunk.isEmpty { break } // EOF
 
                 buffer.append(chunk)
-                parts.append(contentsOf: drainStreamJSONLines(buffer: &buffer))
+                parts.append(contentsOf: drainStreamJSONLines(buffer: &buffer, failure: &failure))
             }
 
-            return parts.joined()
+            return (parts.joined(), failure)
         }
 
         /// Drain every newline-terminated line currently in `buffer`, parsing
-        /// each via `parseStreamJSONLine`. Returns the extracted text
-        /// fragments in order. Lines that are empty after trimming, lines
+        /// each via `parseStreamJSONLine` and folding error lines into `failure`.
+        /// Returns the extracted text fragments in order. Lines that are empty after trimming, lines
         /// that don't decode as UTF-8, and lines that `parseStreamJSONLine`
         /// rejects are silently skipped.
         ///
         /// Trailing bytes without a terminating newline stay in `buffer`
         /// for the next call to consume — the caller must keep the buffer
         /// across iterations.
-        static func drainStreamJSONLines(buffer: inout Data) -> [String] {
+        static func drainStreamJSONLines(buffer: inout Data, failure: inout StreamFailure) -> [String] {
             var fragments: [String] = []
             while let newlineIdx = buffer.firstIndex(of: 0x0A) {
                 let lineData = buffer[buffer.startIndex ..< newlineIdx]
@@ -193,6 +257,7 @@
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                     !line.isEmpty else { continue }
 
+                failure.absorb(line: line)
                 if let text = parseStreamJSONLine(line) {
                     fragments.append(text)
                 }

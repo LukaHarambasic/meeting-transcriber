@@ -797,7 +797,7 @@ extension PipelineQueue {
             stopElapsedTimer()
         } catch {
             logger.warning("[\(shortID, privacy: .public)] protocol_generation_failed error=\(error.localizedDescription, privacy: .public)")
-            addWarning(id: jobID, "Transcript generation failed; raw text saved")
+            addWarning(id: jobID, ProtocolError.jobWarning(for: error))
             // The LLM call (or the save above) failing must not take the
             // user's own notes down with it — save them on their own next to
             // the raw transcript the warning above already points at.
