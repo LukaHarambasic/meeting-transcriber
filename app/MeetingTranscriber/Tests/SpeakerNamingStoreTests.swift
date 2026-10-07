@@ -106,7 +106,7 @@ final class SpeakerNamingStoreTests: XCTestCase {
         let slug = "perm_test"
         try store.save(makeData(), slug: slug)
 
-        let path = tmpDir.appendingPathComponent("recordings/\(slug)_naming.json")
+        let path = OutputLayout.workDir(in: tmpDir).appendingPathComponent("\(slug)_naming.json")
         let mode = try XCTUnwrap(
             FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as? Int,
         )
@@ -149,31 +149,31 @@ final class SpeakerNamingStoreTests: XCTestCase {
 
     func test_deleteNamingJSON_removesOnlyTheNamingFile() throws {
         let store = SpeakerNamingStore(outputDir: tmpDir)
-        let recordingsDir = tmpDir.appendingPathComponent("recordings")
-        try FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+        let workDir = OutputLayout.workDir(in: tmpDir)
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
         let slug = "del_test"
         for suffix in ["_naming.json", "_16k.wav"] {
-            try Data([0]).write(to: recordingsDir.appendingPathComponent("\(slug)\(suffix)"))
+            try Data([0]).write(to: workDir.appendingPathComponent("\(slug)\(suffix)"))
         }
 
         store.deleteNamingJSON(slug: slug)
 
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: recordingsDir.appendingPathComponent("\(slug)_naming.json").path,
+            atPath: workDir.appendingPathComponent("\(slug)_naming.json").path,
         ))
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: recordingsDir.appendingPathComponent("\(slug)_16k.wav").path,
+            atPath: workDir.appendingPathComponent("\(slug)_16k.wav").path,
         ), "deleteNamingJSON must not touch audio sidecars")
     }
 
     func test_cleanupSidecarFiles_removesAudioAndSegmentSidecars() throws {
         let store = SpeakerNamingStore(outputDir: tmpDir)
-        let recordingsDir = tmpDir.appendingPathComponent("recordings")
-        try FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+        let workDir = OutputLayout.workDir(in: tmpDir)
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
         let slug = "cleanup_test"
         let suffixes = ["_16k.wav", "_app_16k.wav", "_mic_16k.wav", "_segments.json"]
         for suffix in suffixes {
-            try Data([0]).write(to: recordingsDir.appendingPathComponent("\(slug)\(suffix)"))
+            try Data([0]).write(to: workDir.appendingPathComponent("\(slug)\(suffix)"))
         }
 
         store.cleanupSidecarFiles(slug: slug)
@@ -181,7 +181,7 @@ final class SpeakerNamingStoreTests: XCTestCase {
         for suffix in suffixes {
             XCTAssertFalse(
                 FileManager.default.fileExists(
-                    atPath: recordingsDir.appendingPathComponent("\(slug)\(suffix)").path,
+                    atPath: workDir.appendingPathComponent("\(slug)\(suffix)").path,
                 ),
                 "\(suffix) should be deleted",
             )

@@ -6,12 +6,12 @@ import Foundation
 /// unit-tested without constructing a `PipelineQueue`. Extracted from
 /// `PipelineQueue` as the first step of unbundling its speaker-naming concern.
 ///
-/// Sidecar layout under `<outputDir>/recordings/`:
+/// Sidecar layout under `OutputLayout.workDir` (`<outputDir>/.audio/`):
 /// - `<slug>_naming.json`  — the `SpeakerNamingData` payload (owner-only)
 /// - `<slug>_16k.wav`, `<slug>_app_16k.wav`, `<slug>_mic_16k.wav` — audio for re-diarization
 /// - `<slug>_segments.json` — cached transcript segments for late re-assignment
 struct SpeakerNamingStore {
-    /// Protocol output directory; the `recordings/` subfolder holds the
+    /// Transcript output directory; its hidden `.audio/` subfolder holds the
     /// sidecars. `nil` disables all I/O (skeleton queues / tests without an
     /// output dir) — every method is then a no-op.
     let outputDir: URL?

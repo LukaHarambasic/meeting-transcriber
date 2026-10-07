@@ -679,9 +679,9 @@ final class PipelineQueueTests: XCTestCase {
             transcriptSegments: [TimestampedSegment(start: 0, end: 5, text: "Never named")],
         )
         let slug = try XCTUnwrap(queue.jobs.first { $0.id == jobID }?.namingSlug)
-        let recordingsDir = tmpDir.appendingPathComponent("recordings")
+        let workDir = OutputLayout.workDir(in: tmpDir)
         let leftovers = ["_naming.json", "_16k.wav", "_app_16k.wav", "_mic_16k.wav", "_segments.json"]
-            .map { recordingsDir.appendingPathComponent("\(slug)\($0)") }
+            .map { workDir.appendingPathComponent("\(slug)\($0)") }
 
         // Premise: naming really did park with data on disk, or the test proves
         // nothing about cleaning it up.
@@ -1013,12 +1013,18 @@ final class PipelineQueueTests: XCTestCase {
 
     // MARK: - Mock-Engine Processing Tests
 
+    /// `askForSpeakerNames` defaults to false, matching `PipelineQueue`'s own
+    /// default (the setting is off out of the box). A test that drives the naming
+    /// dialog path (`.speakerNamingPending`, `speakerNamingHandler`) must opt in:
+    /// with it off, a job with embeddings is resolved as a skip straight after
+    /// stage 3, so the handler is never invoked and the job never parks.
     private func makeMockProcessingQueue(
         engine: MockEngine? = nil,
         diarizationFactory: @escaping () -> any DiarizationProvider = { MockDiarization() },
         diarizationFactoryWithMode: ((DiarizerMode) -> any DiarizationProvider)? = nil,
         diarizeEnabled: Bool = false,
         numSpeakers: Int = 0,
+        askForSpeakerNames: Bool = false,
     ) -> (PipelineQueue, MockEngine) {
         let engine = engine ?? MockEngine()
         let q = PipelineQueue(
@@ -1028,6 +1034,7 @@ final class PipelineQueueTests: XCTestCase {
             protocolGeneratorFactory: { MockProtocolGen() },
             outputDir: tmpDir,
             logDir: tmpDir,
+            askForSpeakerNames: askForSpeakerNames,
             diarizeEnabled: diarizeEnabled,
             numSpeakers: numSpeakers,
             micLabel: "Me",
@@ -1285,12 +1292,15 @@ final class PipelineQueueTests: XCTestCase {
             finished?.warnings.contains { $0.contains("Diarization") } ?? false,
             "the lost diarization was not reported as a warning",
         )
-        // The point of the whole change: the finished transcript is kept.
-        let transcript = finished?.transcriptPath
+        // The point of the whole change: the finished transcript is kept. The
+        // job ended with its `.md` (the `.txt` is retired once that exists), so
+        // the words are read back from there.
+        let transcript = finished?.protocolPath
         XCTAssertNotNil(transcript, "no transcript was written")
+        let saved = try? String(contentsOf: XCTUnwrap(transcript), encoding: .utf8)
         XCTAssertTrue(
-            FileManager.default.fileExists(atPath: transcript?.path ?? ""),
-            "the transcript was recorded but not saved",
+            saved?.contains("Recorded fine") ?? false,
+            "the transcript was recorded but not saved: \(saved ?? "<unreadable>")",
         )
     }
 
@@ -1581,16 +1591,19 @@ final class PipelineQueueTests: XCTestCase {
     func testTheTranscriptIsOnDiskBeforeDiarizationBegins() async throws {
         let engine = MockEngine()
         engine.segmentsToReturn = [TimestampedSegment(start: 0, end: 5, text: "Readable early")]
-        let protocolsDir = tmpDir.appendingPathComponent("protocols")
+        let transcriptsDir = OutputLayout.transcriptsDir(in: tmpDir)
 
         var draftsAtDiarizationEntry: [String] = []
         let queue = PipelineQueue(
             engine: engine,
             diarizationFactory: {
-                let names = (try? FileManager.default
-                    .contentsOfDirectory(atPath: protocolsDir.path)) ?? []
+                // The output folder also holds the test's own audio fixture, so
+                // only the transcript draft (`.txt`) is read.
+                let entries = (try? FileManager.default
+                    .contentsOfDirectory(atPath: transcriptsDir.path)) ?? []
+                let names = entries.filter { $0.hasSuffix(".txt") }
                 draftsAtDiarizationEntry = names.compactMap { name in
-                    try? String(contentsOf: protocolsDir.appendingPathComponent(name), encoding: .utf8)
+                    try? String(contentsOf: transcriptsDir.appendingPathComponent(name), encoding: .utf8)
                 }
                 return MockDiarization()
             },
@@ -1623,14 +1636,21 @@ final class PipelineQueueTests: XCTestCase {
     /// The early write puts the unlabelled transcript on disk. Stage 3 has to
     /// replace it with the labelled one, or the change would trade a readable
     /// intermediate for a permanently worse result.
+    ///
+    /// Protocol generation fails here on purpose. A successful run deletes the
+    /// `.txt` once the `.md` exists, so only on the failing path does the stage-3
+    /// transcript itself remain on disk to be read back: it is then the sole copy
+    /// of the words, which is also the case that matters most.
     func testTheFinishedTranscriptIsTheLabelledOneNotTheEarlyDraft() async throws {
         let engine = MockEngine()
         engine.segmentsToReturn = [
             TimestampedSegment(start: 0, end: 5, text: "First line"),
             TimestampedSegment(start: 5, end: 10, text: "Second line"),
         ]
+        let failingGen = MockProtocolGen()
+        failingGen.shouldThrow = true
         let queue = makeCapturingQueue(
-            engine: engine, diar: MockDiarization(), protocolGen: MockProtocolGen(),
+            engine: engine, diar: MockDiarization(), protocolGen: failingGen,
         )
 
         let audioPath = try createTestAudioFile(in: tmpDir)
@@ -1641,12 +1661,12 @@ final class PipelineQueueTests: XCTestCase {
         queue.insertJobForTesting(job)
         await queue.processNext()
 
-        let protocolsDir = tmpDir.appendingPathComponent("protocols")
+        let transcriptsDir = OutputLayout.transcriptsDir(in: tmpDir)
         let transcripts = try FileManager.default
-            .contentsOfDirectory(atPath: protocolsDir.path)
+            .contentsOfDirectory(atPath: transcriptsDir.path)
             .filter { $0.hasSuffix(".txt") }
         XCTAssertEqual(transcripts.count, 1, "the early draft was left behind as a second file")
-        let saved = try String(contentsOf: protocolsDir.appendingPathComponent(transcripts[0]), encoding: .utf8)
+        let saved = try String(contentsOf: transcriptsDir.appendingPathComponent(transcripts[0]), encoding: .utf8)
         // The label is the mock diarizer's; what matters is that some label is
         // there at all, since the early draft carries none.
         XCTAssertTrue(
@@ -1761,6 +1781,7 @@ final class PipelineQueueTests: XCTestCase {
         )
         let (pQueue, _) = makeMockProcessingQueue(
             engine: engine, diarizationFactory: { mockDiar }, diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
         let job = try PipelineJob(
             meetingTitle: title, appName: "Teams",
@@ -1900,9 +1921,9 @@ final class PipelineQueueTests: XCTestCase {
         let expectedStem = PipelineQueue.namingSlug(
             title: "Reimport Test", jobID: job.id, startTime: job.enqueuedAt,
         )
-        let txt = tmpDir.appendingPathComponent("protocols").appendingPathComponent("\(expectedStem).txt")
+        let transcript = OutputLayout.transcriptsDir(in: tmpDir).appendingPathComponent("\(expectedStem).md")
         XCTAssertTrue(
-            FileManager.default.fileExists(atPath: txt.path),
+            FileManager.default.fileExists(atPath: transcript.path),
             "reimport job must stamp with enqueuedAt and keep the shortID, got stem: \(expectedStem)",
         )
         XCTAssertNil(protocolGen.capturedMeetingStartTime)
@@ -2156,6 +2177,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         var handlerCalled = false
@@ -2202,6 +2224,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         pQueue.speakerNamingHandler = { _ in .skipped }
@@ -2243,6 +2266,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         var callCount = 0
@@ -2301,6 +2325,7 @@ final class PipelineQueueTests: XCTestCase {
                 return mode == .sortformer ? sortformerDiar : offlineDiar
             },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         var callCount = 0
@@ -2724,6 +2749,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
         // Don't set speakerNamingHandler — pipeline proceeds with auto-names immediately
 
@@ -2776,6 +2802,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         pQueue.speakerNamingHandler = { _ in .confirmed(["SPEAKER_0": "Alice"]) }
@@ -2818,6 +2845,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
         // No speakerNamingHandler — the production/headless path. autoSkipNaming
         // must make the job finish on its own instead of parking at
@@ -2842,6 +2870,50 @@ final class PipelineQueueTests: XCTestCase {
             pQueue.speakerNamingDataByJob[job.id],
             "Auto-skipped job should not stash naming data awaiting resolution",
         )
+    }
+
+    /// Out of the box the app does not ask for speaker names: a job that has
+    /// embeddings to name is resolved as a skip straight after stage 3. The
+    /// handler (the stand-in for the dialog) is never invoked, the job never
+    /// parks in `.speakerNamingPending`, and no naming data is left behind.
+    /// Every dialog-path test opts in through `askForSpeakerNames: true`, so this
+    /// is the one that pins the default.
+    func testJobIsResolvedWithoutAskingWhenSpeakerNamesAreNotRequested() async throws {
+        let engine = MockEngine()
+        engine.segmentsToReturn = [TimestampedSegment(start: 0, end: 5, text: "Hello")]
+        let mockDiar = MockDiarization()
+        mockDiar.resultToReturn = DiarizationResult(
+            segments: [.init(start: 0, end: 5, speaker: "SPEAKER_0")],
+            speakingTimes: ["SPEAKER_0": 5],
+            autoNames: [:],
+            embeddings: ["SPEAKER_0": [1, 0, 0]],
+        )
+        let (pQueue, _) = makeMockProcessingQueue(
+            engine: engine,
+            diarizationFactory: { mockDiar },
+            diarizeEnabled: true,
+        )
+        var handlerCalled = false
+        pQueue.speakerNamingHandler = { _ in
+            handlerCalled = true
+            return .skipped
+        }
+        let done = XCTestExpectation(description: "job done without asking")
+        pQueue.onJobStateChange = { _, _, newState in
+            if newState == .done { done.fulfill() }
+        }
+
+        let job = try PipelineJob(
+            meetingTitle: "Not Asked", appName: "TestApp",
+            mixPath: createTestAudioFile(in: tmpDir), appPath: nil, micPath: nil, micDelay: 0,
+        )
+        pQueue.enqueue(job)
+        await pQueue.processNext()
+        await fulfillment(of: [done], timeout: 10)
+
+        XCTAssertFalse(handlerCalled, "the naming dialog stand-in must not be invoked when names are not requested")
+        XCTAssertEqual(pQueue.jobs.first?.state, .done)
+        XCTAssertNil(pQueue.speakerNamingDataByJob[job.id], "an unasked job must not keep naming data around")
     }
 
     func testCompleteSpeakerNamingLateConfirmedTransitionsToDone() async {
@@ -3157,6 +3229,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
         // No handler → pipeline proceeds immediately with auto-names
 
@@ -3250,8 +3323,7 @@ final class PipelineQueueTests: XCTestCase {
         pQueue.completeSpeakerNaming(jobID: jobID, result: .rerun(3))
         await fulfillment(of: [doneExpectation], timeout: 60)
 
-        let finalPath = try XCTUnwrap(pQueue.jobs.first?.transcriptPath)
-        let finalTranscript = try String(contentsOf: finalPath, encoding: .utf8)
+        let finalTranscript = try finishedTranscript(of: pQueue.jobs.first)
         XCTAssertTrue(finalTranscript.contains("] Alice: Hello"), "First speaker should appear after re-run confirm")
         XCTAssertTrue(finalTranscript.contains("] Bob: How are you"), "Second speaker must survive into the transcript")
         XCTAssertTrue(finalTranscript.contains("] Carol: Goodbye"), "Third speaker must survive into the transcript")
@@ -3278,6 +3350,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         try pQueue.enqueue(makeDualSourceJob(title: "Dual Rerun Rebuild"))
@@ -3313,8 +3386,7 @@ final class PipelineQueueTests: XCTestCase {
         pQueue.completeSpeakerNaming(jobID: jobID, result: .rerun(2))
         await fulfillment(of: [done], timeout: 60)
 
-        let finalPath = try XCTUnwrap(pQueue.jobs.first?.transcriptPath)
-        let finalTranscript = try String(contentsOf: finalPath, encoding: .utf8)
+        let finalTranscript = try finishedTranscript(of: pQueue.jobs.first)
         XCTAssertTrue(finalTranscript.contains("] Alice: First"), "First remote speaker should appear after re-run confirm")
         XCTAssertTrue(finalTranscript.contains("] Bob: Second"), "Second remote speaker must survive into the transcript")
     }
@@ -3350,7 +3422,7 @@ final class PipelineQueueTests: XCTestCase {
         pQueue.completeSpeakerNaming(jobID: jobID, result: .rerun(3))
         await fulfillment(of: [done], timeout: 60)
 
-        let finalTranscript = try String(contentsOf: XCTUnwrap(pQueue.jobs.first?.transcriptPath), encoding: .utf8)
+        let finalTranscript = try finishedTranscript(of: pQueue.jobs.first)
         XCTAssertTrue(finalTranscript.contains("SPEAKER_1:"), "Skip must keep the re-run's added speakers (auto-named)")
         XCTAssertTrue(finalTranscript.contains("SPEAKER_2:"), "Skip must keep all re-run speakers")
     }
@@ -3373,7 +3445,7 @@ final class PipelineQueueTests: XCTestCase {
         // Simulate an older recording: remove the persisted transcript segments.
         let slug = try XCTUnwrap(pQueue.jobs.first?.namingSlug)
         try FileManager.default.removeItem(
-            at: tmpDir.appendingPathComponent("recordings").appendingPathComponent("\(slug)_segments.json"),
+            at: OutputLayout.workDir(in: tmpDir).appendingPathComponent("\(slug)_segments.json"),
         )
 
         mockDiar.resultToReturn = DiarizationResult(
@@ -3392,7 +3464,7 @@ final class PipelineQueueTests: XCTestCase {
         pQueue.completeSpeakerNaming(jobID: jobID, result: .rerun(2))
         await fulfillment(of: [done], timeout: 60)
 
-        let after = try String(contentsOf: transcriptPath, encoding: .utf8)
+        let after = try finishedTranscript(of: pQueue.jobs.first)
         XCTAssertEqual(after, before, "Missing segments must not wipe or alter the saved transcript")
         let warnings = try XCTUnwrap(pQueue.jobs.first?.warnings)
         XCTAssertTrue(
@@ -3413,13 +3485,18 @@ final class PipelineQueueTests: XCTestCase {
             ],
         )
 
-        // Force the rewrite's write to fail: delete the protocols directory so
-        // the atomic write to the job's transcriptPath has no parent. The
-        // persisted segments live in recordings/, so loadCachedSegments still
+        // Force the rewrite's write to fail: the transcript sits in the output
+        // folder itself now, so there is no transcripts directory to delete.
+        // Replace the file with a non-empty directory instead; the atomic write
+        // renames onto that path and cannot replace a directory. The persisted
+        // segments live in the working directory, so loadCachedSegments still
         // succeeds and the failure lands in the write (not the no-segments early
         // return). Confirm (not skip) so the job still reaches .done despite the
-        // now-missing transcript file.
-        try FileManager.default.removeItem(at: tmpDir.appendingPathComponent("protocols"))
+        // now-unreadable transcript path.
+        let transcriptPath = try XCTUnwrap(pQueue.jobs.first?.transcriptPath)
+        try FileManager.default.removeItem(at: transcriptPath)
+        try FileManager.default.createDirectory(at: transcriptPath, withIntermediateDirectories: true)
+        try Data([0]).write(to: transcriptPath.appendingPathComponent("blocker"))
 
         mockDiar.resultToReturn = DiarizationResult(
             segments: [
@@ -3434,18 +3511,34 @@ final class PipelineQueueTests: XCTestCase {
         pQueue.onJobStateChange = { _, _, newState in
             if newState == .done { done.fulfill() }
         }
-        let transcriptPath = try XCTUnwrap(pQueue.jobs.first?.transcriptPath)
         pQueue.completeSpeakerNaming(jobID: jobID, result: .rerun(2))
         await fulfillment(of: [done], timeout: 60)
 
         XCTAssertEqual(pQueue.jobs.first?.state, .done, "Write failure during re-segmentation must not wedge the job")
         // Proves the write genuinely failed (exercising the rewrite's catch):
-        // the atomic write can't recreate the deleted parent directory, so no
-        // transcript file exists afterwards.
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: transcriptPath.path),
-            "The rewrite write must have failed (no parent dir), exercising the catch path",
+        // the atomic write can't replace the directory, so it is still one.
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: transcriptPath.path, isDirectory: &isDirectory) && isDirectory.boolValue,
+            "The rewrite write must have failed (path is blocked), exercising the catch path",
         )
+        // And that it failed in the write, not before it: the segments were found.
+        XCTAssertFalse(
+            pQueue.jobs.first?.warnings.contains { $0.contains("no saved transcript segments") } ?? false,
+            "The failure must come from the write, not from missing segments",
+        )
+    }
+
+    /// The transcript text a finished job ended up with. Once the `.md` exists
+    /// the working `.txt` is deleted and `transcriptPath` is cleared, so the
+    /// words are read back from the `.md`, under its "Full Transcript" heading
+    /// (frontmatter lists speaker labels too, which would satisfy a substring
+    /// check by accident).
+    private func finishedTranscript(of job: PipelineJob?) throws -> String {
+        let md = try String(contentsOf: XCTUnwrap(job?.protocolPath), encoding: .utf8)
+        let marker = "## Full Transcript\n\n"
+        let range = try XCTUnwrap(md.range(of: marker), "no Full Transcript section in: \(md)")
+        return String(md[range.upperBound...])
     }
 
     /// Factory helper for the mode-override integration tests. Returns a
@@ -3485,6 +3578,7 @@ final class PipelineQueueTests: XCTestCase {
                 return mode == .sortformer ? sortformerDiar : offlineDiar
             },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         let audioPath = try createTestAudioFile(in: tmpDir)
@@ -3537,6 +3631,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         let audioPath = try createTestAudioFile(in: tmpDir)
@@ -3595,6 +3690,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         let audioPath = try createTestAudioFile(in: tmpDir)
@@ -3652,6 +3748,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         // First run: both tracks succeed → reach speakerNamingPending with
@@ -3721,6 +3818,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         // First run → speakerNamingPending (persists _app_16k/_mic_16k + naming).
@@ -3776,6 +3874,7 @@ final class PipelineQueueTests: XCTestCase {
             engine: engine,
             diarizationFactory: { mockDiar },
             diarizeEnabled: true,
+            askForSpeakerNames: true,
         )
 
         let audioPath = try createTestAudioFile(in: tmpDir)
@@ -3824,8 +3923,8 @@ final class PipelineQueueTests: XCTestCase {
 
     func testLoadSnapshotRebuildsSpeakerNamingCache() throws {
         let outputDir = tmpDir.appendingPathComponent("output")
-        let recordingsDir = outputDir.appendingPathComponent("recordings")
-        try FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+        let workDir = OutputLayout.workDir(in: outputDir)
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
 
         let mixPath = tmpDir.appendingPathComponent("mix.wav")
         try Data([0]).write(to: mixPath)
@@ -3851,13 +3950,13 @@ final class PipelineQueueTests: XCTestCase {
             mapping: ["SPEAKER_0": "Alice"],
             speakingTimes: ["SPEAKER_0": 60.0],
             embeddings: ["SPEAKER_0": [0.1, 0.2]],
-            audioPath: recordingsDir.appendingPathComponent("snapshot_test_16k.wav"),
+            audioPath: workDir.appendingPathComponent("snapshot_test_16k.wav"),
             segments: [.init(start: 0, end: 5, speaker: "SPEAKER_0")],
             participants: [],
             isDualSource: false,
         )
         let json = try JSONEncoder().encode(namingData)
-        try json.write(to: recordingsDir.appendingPathComponent("snapshot_test_naming.json"))
+        try json.write(to: workDir.appendingPathComponent("snapshot_test_naming.json"))
 
         // Load snapshot in a new queue that has outputDir set
         let mockEngine = MockEngine()
