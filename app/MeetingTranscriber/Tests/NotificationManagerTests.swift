@@ -124,8 +124,8 @@ final class NotificationManagerTests: XCTestCase {
             for: .protocolReady,
             status: statusWithMeeting(app: "Zoom", title: "Retro"),
         )
-        XCTAssertEqual(content?.title, "Protocol Ready")
-        XCTAssertEqual(content?.body, "Protocol for \"Retro\" is ready.")
+        XCTAssertEqual(content?.title, "Transcript Ready")
+        XCTAssertEqual(content?.body, "Transcript for \"Retro\" is ready.")
     }
 
     func testNotificationContentProtocolReadyFallsBackToMeetingLabel() {
@@ -133,7 +133,7 @@ final class NotificationManagerTests: XCTestCase {
             for: .protocolReady,
             status: statusWithNoMeeting(),
         )
-        XCTAssertEqual(content?.body, "Protocol for \"Meeting\" is ready.")
+        XCTAssertEqual(content?.body, "Transcript for \"Meeting\" is ready.")
     }
 
     func testNotificationContentWaitingForSpeakerNames() {

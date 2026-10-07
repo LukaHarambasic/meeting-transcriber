@@ -52,7 +52,7 @@ final class RecordingIssueTests: XCTestCase {
             recordingError: nil, micSilent: false, appSilent: false, askUnanswerable: false,
         )
         XCTAssertEqual(issue?.headline, PermissionProblem.screenRecordingBroken.description)
-        XCTAssertTrue(issue?.headline.contains("toggle it off and on") ?? false)
+        XCTAssertTrue(issue?.headline.contains("Toggle it off and on") ?? false)
     }
 
     // MARK: - Precedence

@@ -17,7 +17,7 @@ final class TranscriberStatusTests: XCTestCase {
     }
 
     func testGeneratingProtocolLabel() {
-        XCTAssertEqual(TranscriberState.generatingProtocol.label, "Generating Protocol...")
+        XCTAssertEqual(TranscriberState.generatingProtocol.label, "Writing Transcript...")
     }
 
     func testWaitingForSpeakerCountLabel() {
@@ -29,7 +29,7 @@ final class TranscriberStatusTests: XCTestCase {
     }
 
     func testProtocolReadyLabel() {
-        XCTAssertEqual(TranscriberState.protocolReady.label, "Protocol Ready")
+        XCTAssertEqual(TranscriberState.protocolReady.label, "Transcript Ready")
     }
 
     func testErrorLabel() {

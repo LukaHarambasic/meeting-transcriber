@@ -166,7 +166,7 @@ final class PermissionHealthCheckTests: XCTestCase {
         let broken = PermissionHealthCheck.overallHealth(screenRecording: .broken, microphone: .healthy)
         let denied = PermissionHealthCheck.overallHealth(screenRecording: .denied, microphone: .healthy)
         XCTAssertTrue(broken.notificationBody.contains("Screen Recording"))
-        XCTAssertTrue(broken.notificationBody.contains("toggle"))
+        XCTAssertTrue(broken.notificationBody.contains("Toggle it off and on"))
         XCTAssertTrue(denied.notificationBody.contains("denied"))
         XCTAssertNotEqual(broken.notificationBody, denied.notificationBody)
     }
@@ -175,7 +175,7 @@ final class PermissionHealthCheckTests: XCTestCase {
         let broken = PermissionHealthCheck.overallHealth(screenRecording: .healthy, microphone: .broken)
         let denied = PermissionHealthCheck.overallHealth(screenRecording: .healthy, microphone: .denied)
         XCTAssertTrue(broken.notificationBody.contains("Microphone"))
-        XCTAssertTrue(broken.notificationBody.contains("toggle"))
+        XCTAssertTrue(broken.notificationBody.contains("Toggle it off and on"))
         XCTAssertTrue(denied.notificationBody.contains("denied"))
         XCTAssertNotEqual(broken.notificationBody, denied.notificationBody)
     }

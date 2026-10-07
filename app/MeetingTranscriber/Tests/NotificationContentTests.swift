@@ -46,8 +46,8 @@ final class NotificationContentTests: XCTestCase {
         let content = NotificationManager.notificationContent(for: .protocolReady, status: status)
 
         XCTAssertNotNil(content)
-        XCTAssertEqual(content?.title, "Protocol Ready")
-        XCTAssertEqual(content?.body, "Protocol for \"Design Review\" is ready.")
+        XCTAssertEqual(content?.title, "Transcript Ready")
+        XCTAssertEqual(content?.body, "Transcript for \"Design Review\" is ready.")
     }
 
     func testProtocolReadyNoMeeting() {
@@ -56,7 +56,7 @@ final class NotificationContentTests: XCTestCase {
         let content = NotificationManager.notificationContent(for: .protocolReady, status: status)
 
         XCTAssertNotNil(content)
-        XCTAssertEqual(content?.body, "Protocol for \"Meeting\" is ready.")
+        XCTAssertEqual(content?.body, "Transcript for \"Meeting\" is ready.")
     }
 
     // MARK: - Speaker Names
@@ -68,7 +68,7 @@ final class NotificationContentTests: XCTestCase {
 
         XCTAssertNotNil(content)
         XCTAssertEqual(content?.title, "Name Speakers")
-        XCTAssertEqual(content?.body, "Speakers detected — open the app to assign names")
+        XCTAssertEqual(content?.body, "Speakers detected. Open the app to assign names.")
     }
 
     // MARK: - Error
@@ -137,6 +137,6 @@ final class NotificationContentTests: XCTestCase {
     func testProtocolReadyFallbackTitle() {
         let status = makeStatus(state: .protocolReady)
         let content = NotificationManager.notificationContent(for: .protocolReady, status: status)
-        XCTAssertEqual(content?.body, "Protocol for \"Meeting\" is ready.")
+        XCTAssertEqual(content?.body, "Transcript for \"Meeting\" is ready.")
     }
 }
