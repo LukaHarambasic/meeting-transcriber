@@ -34,14 +34,4 @@ enum NoteTarget: Equatable, Sendable {
     var isLive: Bool {
         recordingStem != nil
     }
-
-    /// Recording start for the live case, the day for a scratch note. Used by
-    /// the panel's header and by the scratch file's name.
-    var referenceDate: Date {
-        switch self {
-        case let .liveRecording(_, startedAt): startedAt
-
-        case let .scratch(day): day
-        }
-    }
 }

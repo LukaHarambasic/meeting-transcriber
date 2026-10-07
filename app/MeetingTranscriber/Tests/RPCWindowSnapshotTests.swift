@@ -41,6 +41,20 @@
             XCTAssertFalse(info.fullScreenAuxiliary)
         }
 
+        /// The notes lane in `scripts/e2e-app.sh` reads both fields off `/state`:
+        /// the number to aim `screencapture -l` at, and the capture flag it then
+        /// checks against the real capture attempt.
+        func testWindowInfoReportsNumberAndCaptureExclusion() {
+            let hidden = makeWindow()
+            hidden.sharingType = .none
+            let hiddenInfo = RPCStateSnapshot.WindowInfo(window: hidden, id: "notes")
+            XCTAssertEqual(hiddenInfo.windowNumber, hidden.windowNumber)
+            XCTAssertTrue(hiddenInfo.excludedFromCapture)
+
+            let shown = RPCStateSnapshot.WindowInfo(window: makeWindow(), id: "settings")
+            XCTAssertFalse(shown.excludedFromCapture)
+        }
+
         /// The exact wire shape the e2e `jq` filter reads.
         func testWindowsSerialiseIntoSnapshotJSON() throws {
             let info = RPCStateSnapshot.WindowInfo(

@@ -63,27 +63,6 @@ final class NotesStoreTests: XCTestCase {
         XCTAssertEqual(permissions, FileManager.ownerOnlyPermissions)
     }
 
-    func testAppendAddsABlockToExistingText() throws {
-        let (recordings, output) = try makeDirs()
-        let store = makeStore(recordingsDir: recordings) { output }
-        let target = NoteTarget.liveRecording(stem: "20260909_090000", startedAt: Date())
-
-        store.save("hello live", to: target)
-        store.append("more", to: target)
-
-        XCTAssertEqual(store.load(target), "hello live\n\nmore")
-    }
-
-    func testAppendWithNoExistingTextWritesTheTextAlone() throws {
-        let (recordings, output) = try makeDirs()
-        let store = makeStore(recordingsDir: recordings) { output }
-        let target = NoteTarget.liveRecording(stem: "20260909_090000", startedAt: Date())
-
-        store.append("first block", to: target)
-
-        XCTAssertEqual(store.load(target), "first block")
-    }
-
     // MARK: - take(stem:)
 
     /// `take` is read-and-clear: a copy left behind in the staging directory

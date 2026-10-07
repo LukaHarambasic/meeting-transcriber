@@ -39,17 +39,12 @@ final class NotesStore: NotesStoring, @unchecked Sendable {
         withLock { writeLocked(text, to: target) }
     }
 
-    /// Reads and writes under one lock hold, so a concurrent `save` from the
-    /// panel cannot land between the read and the write and be silently
-    /// dropped.
-    func append(_ text: String, to target: NoteTarget) {
-        withLock {
-            let existing = readLocked(target)
-            let combined = existing.isEmpty ? text : existing + "\n\n" + text
-            writeLocked(combined, to: target)
-        }
-    }
-
+    /// The notes for a finished recording, removed as they are handed over.
+    ///
+    /// Read-and-clear, because the text is about to become part of the job and a
+    /// copy left in the staging directory would be picked up a second time by
+    /// orphan recovery. Returns nil when the recording has no notes, which is the
+    /// common case and not an error.
     func take(stem: String) -> String? {
         withLock {
             let url = liveRecordingURL(stem: stem)

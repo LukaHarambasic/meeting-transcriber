@@ -18,16 +18,6 @@ private final class RecordingNotesStore: NotesStoring, @unchecked Sendable {
         storage[key(target)] = text
     }
 
-    func append(_ text: String, to target: NoteTarget) {
-        lock.lock()
-        defer { lock.unlock() }
-        storage[key(target), default: ""] += text
-    }
-
-    func take(stem _: String) -> String? {
-        nil
-    }
-
     func fileURL(for _: NoteTarget) -> URL {
         URL(fileURLWithPath: "/tmp/notes-controller-tests.md")
     }

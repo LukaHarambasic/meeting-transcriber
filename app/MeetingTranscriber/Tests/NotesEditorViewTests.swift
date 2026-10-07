@@ -23,16 +23,6 @@ private final class FakeNotesStore: NotesStoring, @unchecked Sendable {
         storage[key(target)] = text
     }
 
-    func append(_ text: String, to target: NoteTarget) {
-        lock.lock()
-        defer { lock.unlock() }
-        storage[key(target), default: ""] += text
-    }
-
-    func take(stem _: String) -> String? {
-        nil
-    }
-
     func fileURL(for target: NoteTarget) -> URL {
         URL(fileURLWithPath: "/tmp/w1-notes-tests/\(key(target)).md")
     }
