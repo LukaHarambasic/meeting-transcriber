@@ -134,6 +134,22 @@ class WatchLoop {
     /// also every existing test's expectation.
     let takeNotes: (String) -> String?
 
+    /// Dynamic accessor for `AppSettings.autoStopWhenCallEnds`, read at every
+    /// poll so toggling it mid-recording takes effect. Defaults to off for the
+    /// same reason as the probe above: the rule is opt-in at this seam and the
+    /// production wiring passes the real setting.
+    let autoStopWhenCallEnds: () -> Bool
+
+    /// Thresholds of the call-end rule. Injected whole so a test can drive both
+    /// in virtual time.
+    let callEndPolicy: CallEndPolicy
+
+    /// Whether another process is capturing from an input device right now.
+    /// Injected because the production implementation reads CoreAudio, and
+    /// defaults to `.unknown`, which `CallEndPolicy` treats as no evidence, so a
+    /// test that does not mention it can never be stopped by the call-end rule.
+    let micUsage: () -> MicUsage
+
     /// When this recording was last known to be wanted: its start, or the
     /// user's last confirmation. `private(set)` for the RPC snapshot and tests.
     private(set) var confirmedAt: Date = .distantPast
@@ -208,6 +224,9 @@ class WatchLoop {
         },
         askDeliverability: @MainActor @escaping () async -> AskDeliverability = { .unknown },
         takeNotes: @escaping (String) -> String? = { _ in nil },
+        autoStopWhenCallEnds: @escaping () -> Bool = { false },
+        callEndPolicy: CallEndPolicy = CallEndPolicy(),
+        micUsage: @escaping () -> MicUsage = { .unknown },
     ) {
         self.recorderFactory = recorderFactory
         self.pipelineQueue = pipelineQueue
@@ -227,6 +246,9 @@ class WatchLoop {
         self.salvageInterrupted = salvageInterrupted
         self.askDeliverability = askDeliverability
         self.takeNotes = takeNotes
+        self.autoStopWhenCallEnds = autoStopWhenCallEnds
+        self.callEndPolicy = callEndPolicy
+        self.micUsage = micUsage
     }
 
     nonisolated static var defaultOutputDir: URL {

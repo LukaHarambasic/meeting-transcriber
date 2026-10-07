@@ -98,6 +98,10 @@ extension XCTestCase {
         // deletes files under `AppPaths.recordingsDir`, which is the user's real
         // recording staging area on a contributor's machine.
         recoverInterrupted: @escaping () -> Int = { 0 },
+        // Defaults to "cannot tell" for the same reason: the production probe
+        // reads the machine's real CoreAudio process list, and which apps hold
+        // the microphone while the suite runs is not something a test controls.
+        micUsage: @escaping () -> MicUsage = { .unknown },
     ) -> WatchingController {
         // Own defaults suite, like `makeRPCTestState`: `AppSettings()` on
         // `.standard` writes into the test host's real preferences, and
@@ -158,6 +162,7 @@ extension XCTestCase {
             makeSleepBlocker: makeSleepBlocker,
             confirmationPolicy: confirmationPolicy,
             recoverInterrupted: recoverInterrupted,
+            micUsage: micUsage,
         )
     }
 }

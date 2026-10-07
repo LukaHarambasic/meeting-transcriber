@@ -114,6 +114,11 @@ final class WatchingController {
     /// from production here for the same reason as `recoverInterrupted`: no test
     /// should reach the real staging directory by omission.
     private let takeNotes: (String) -> String?
+    /// Passed straight through to each `WatchLoop` this controller builds. The
+    /// production default reads CoreAudio's per-process input flags; the test
+    /// factory overrides it with "cannot tell" so no test reaches the real
+    /// audio system by omission, the same split as `makeSleepBlocker`.
+    private let micUsage: () -> MicUsage
 
     init(
         settings: AppSettings,
@@ -137,6 +142,7 @@ final class WatchingController {
         },
         askDeliverability: @escaping @Sendable () async -> AskDeliverability = { .unknown },
         takeNotes: @escaping (String) -> String? = { _ in nil },
+        micUsage: @escaping () -> MicUsage = { MicUsageProbe.currentUsage() },
     ) {
         self.settings = settings
         self.notifier = notifier
@@ -153,6 +159,7 @@ final class WatchingController {
         self.confirmationPolicy = confirmationPolicy
         self.recoverInterrupted = recoverInterrupted
         self.takeNotes = takeNotes
+        self.micUsage = micUsage
     }
 
     // MARK: - Derived
@@ -286,6 +293,8 @@ final class WatchingController {
             confirmationPolicy: confirmationPolicy,
             askDeliverability: askDeliverability,
             takeNotes: takeNotes,
+            autoStopWhenCallEnds: { [settings] in settings.autoStopWhenCallEnds },
+            micUsage: micUsage,
         )
         watchLoop = loop
 

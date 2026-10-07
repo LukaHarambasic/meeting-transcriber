@@ -119,6 +119,14 @@ final class AppSettings {
         didSet { defaults.set(recordOnly, forKey: "recordOnly") }
     }
 
+    /// When true, a recording is stopped and saved once the meeting app has
+    /// released the microphone for a couple of minutes (`CallEndPolicy`).
+    /// Default on: the point is the recording the user forgot to stop. Read at
+    /// every poll of the monitor, so toggling it mid-recording takes effect.
+    var autoStopWhenCallEnds: Bool {
+        didSet { defaults.set(autoStopWhenCallEnds, forKey: "autoStopWhenCallEnds") }
+    }
+
     /// CoreAudio device UID for mic selection. Empty string = system default.
     var micDeviceUID: String {
         didSet { defaults.set(micDeviceUID, forKey: "micDeviceUID") }
@@ -422,6 +430,7 @@ final class AppSettings {
 
         noMic = defaults.object(forKey: "noMic") as? Bool ?? false
         recordOnly = defaults.object(forKey: "recordOnly") as? Bool ?? false
+        autoStopWhenCallEnds = defaults.object(forKey: "autoStopWhenCallEnds") as? Bool ?? true
         micDeviceUID = defaults.object(forKey: "micDeviceUID") as? String ?? ""
         micName = defaults.object(forKey: "micName") as? String ?? "Me"
         perChannelIndicatorEnabled = defaults.object(forKey: "perChannelIndicatorEnabled") as? Bool ?? true
