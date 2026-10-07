@@ -91,6 +91,22 @@ final class NotesController {
         reload()
     }
 
+    /// A recording started or stopped. A start only re-targets, so the panel
+    /// is never opened behind the user's back; a stop also closes it, because
+    /// the meeting the panel was open for is over.
+    ///
+    /// Closes before re-targeting so the panel is already on its way out while
+    /// the target still names the finished recording: nothing it commits on the
+    /// way out can land in the scratch note. The text itself is safe either way,
+    /// since `text`'s `didSet` has written every keystroke to the recording's
+    /// file already.
+    func recordingStateChanged(isRecording: Bool) {
+        if !isRecording {
+            close()
+        }
+        retarget()
+    }
+
     /// Fill `text` from the target's file without triggering a write-back.
     private func reload() {
         let loaded: String = store.load(target)

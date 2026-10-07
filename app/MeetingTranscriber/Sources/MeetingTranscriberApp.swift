@@ -89,13 +89,13 @@ private struct NotesSceneWiring: ViewModifier {
     let isRecording: Bool
     let onVisibilityChange: (Bool) -> Void
     let onHotkeySettingChange: (Bool) -> Void
-    let onRecordingChange: () -> Void
+    let onRecordingChange: (Bool) -> Void
 
     func body(content: Content) -> some View {
         content
             .onChange(of: isVisible) { _, visible in onVisibilityChange(visible) }
             .onChange(of: hotkeyEnabled, initial: true) { _, enabled in onHotkeySettingChange(enabled) }
-            .onChange(of: isRecording) { _, _ in onRecordingChange() }
+            .onChange(of: isRecording) { _, recording in onRecordingChange(recording) }
     }
 }
 
@@ -333,7 +333,7 @@ struct MeetingTranscriberApp: App {
             isRecording: appState.watching.isRecording,
             onVisibilityChange: applyNotesVisibility,
             onHotkeySettingChange: applyNotesHotkeySetting,
-            onRecordingChange: retargetNotes,
+            onRecordingChange: notesRecordingChanged,
         )
     }
 
@@ -363,14 +363,13 @@ struct MeetingTranscriberApp: App {
         }
     }
 
-    /// A recording starting or stopping changes where a note belongs.
-    /// Re-targeting reloads from the new destination rather than carrying text
-    /// across: words typed before a meeting started were not said in it.
+    /// A recording starting or stopping changes where a note belongs, and a stop
+    /// also closes the panel (see `NotesController.recordingStateChanged`).
     ///
     /// Named rather than a closure literal at the call site, which is the shape
     /// SwiftLint's `trailing_closure` rule wants here.
-    private func retargetNotes() {
-        appState.notes.retarget()
+    private func notesRecordingChanged(_ isRecording: Bool) {
+        appState.notes.recordingStateChanged(isRecording: isRecording)
     }
 
     /// The menu row's action. Named rather than a closure literal at the call
