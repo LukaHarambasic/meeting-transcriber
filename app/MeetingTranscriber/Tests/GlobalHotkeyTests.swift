@@ -58,17 +58,4 @@ final class GlobalHotkeyTests: XCTestCase {
         first.stop()
         second.stop()
     }
-
-    func testDeinitReleasesTheRegistrationWithoutExplicitStop() {
-        var hotkey: GlobalHotkey? = GlobalHotkey(keyCode: testKeyCode, modifiers: testModifiers) {}
-        XCTAssertTrue(hotkey?.isRegistered ?? false)
-        hotkey = nil
-
-        let after = GlobalHotkey(keyCode: testKeyCode, modifiers: testModifiers) {}
-        XCTAssertTrue(
-            after.isRegistered,
-            "deinit must unregister the hotkey; otherwise the combo stays claimed after the owner is gone",
-        )
-        after.stop()
-    }
 }

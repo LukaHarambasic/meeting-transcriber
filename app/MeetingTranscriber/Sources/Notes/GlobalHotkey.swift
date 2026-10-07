@@ -57,18 +57,16 @@ final class GlobalHotkey {
         register(keyCode: keyCode, modifiers: modifiers)
     }
 
-    /// `isolated deinit`: without it, `deinit` runs on no actor at all (Swift
-    /// deinitializers are non-isolated by default even on a `@MainActor`
-    /// class) and cannot touch `registry`, which is main-actor state shared
-    /// with the Carbon callback.
-    isolated deinit {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-        }
-        Self.registry[id] = nil
-    }
+    // No deinit, deliberately. `registry` holds a strong reference to every
+    // registered instance, so a deinit could only ever run after `stop()` had
+    // already unregistered and removed it: `stop()` is the release path. An
+    // `isolated deinit` here also crashed the Swift 6.3.3 compiler whenever
+    // code coverage was on (SILGen `emitIsolatingDestructor` during
+    // `-emit-module`), which is how CI builds, so the test suite never ran.
 
-    /// Unregisters the hotkey. Safe to call more than once.
+    /// Unregisters the hotkey. Safe to call more than once. The owner must call
+    /// it before releasing the instance; dropping the last outside reference
+    /// alone leaves the registration live, because `registry` still holds one.
     func stop() {
         if let hotKeyRef {
             UnregisterEventHotKey(hotKeyRef)
