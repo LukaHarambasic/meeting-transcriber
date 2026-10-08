@@ -337,7 +337,13 @@
         /// `/usr/bin/env` fallback, prepend `claudeBin` so env can resolve
         /// it from PATH.
         static func buildSubprocessArgs(claudeBin: String, resolvedBin: String) -> [String] {
-            var args = ["-p", "-", "--output-format", "stream-json", "--verbose", "--model", "sonnet"]
+            // `--restricted` ignores the user's own Claude settings files, so
+            // their hooks cannot run inside this call. Without it a personal Stop
+            // hook made the model answer it after the protocol, and that reply
+            // was appended to the saved summary ("Nothing new to record from
+            // this task." in 19 transcripts). It also removes the CLI's
+            // command-running tools, which summarising a transcript never needs.
+            var args = ["-p", "-", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--restricted"]
             if resolvedBin == "/usr/bin/env" {
                 args.insert(claudeBin, at: 0)
             }

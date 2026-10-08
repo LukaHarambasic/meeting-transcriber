@@ -124,7 +124,7 @@
             )
             XCTAssertEqual(
                 args,
-                ["-p", "-", "--output-format", "stream-json", "--verbose", "--model", "sonnet"],
+                ["-p", "-", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--restricted"],
             )
         }
 
@@ -137,7 +137,7 @@
             )
             XCTAssertEqual(
                 args,
-                ["claude-work", "-p", "-", "--output-format", "stream-json", "--verbose", "--model", "sonnet"],
+                ["claude-work", "-p", "-", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--restricted"],
             )
         }
 
