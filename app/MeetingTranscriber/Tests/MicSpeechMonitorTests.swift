@@ -249,12 +249,15 @@ final class MicSpeechMonitorTests: XCTestCase {
 
     func testModelThatCannotLoadLeavesTheReadingUnavailable() async {
         let attempts = OSAllocatedUnfairLock(initialState: 0)
+        // A local, not `self.t0`: the clock closure is `@Sendable`, and the
+        // test class is not.
+        let start: Date = t0
         let monitor = MicSpeechMonitor(
             makeClassifier: {
                 attempts.withLock { $0 += 1 }
                 throw MicSpeechTestError.noModel
             },
-            now: { self.t0 },
+            now: { start },
         )
         let sink = monitor.sink(teeing: nil)
         monitor.begin()
