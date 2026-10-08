@@ -20,7 +20,7 @@ enum A11yID {
     // Settings — section anchors + record-only controls.
     static let recordOnlyToggle = "recordOnlyToggle"
     static let recordOnlyBanner = "recordOnlyBanner"
-    static let autoStopWhenCallEndsToggle = "autoStopWhenCallEndsToggle"
+    static let autoStopWhenMeetingEndsToggle = "autoStopWhenMeetingEndsToggle"
     static let transcriptionSection = "transcriptionSection"
     static let protocolSection = "protocolSection"
     static let outputFolderSection = "outputFolderSection"

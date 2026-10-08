@@ -120,6 +120,12 @@ final class WatchingController {
     /// audio system by omission, the same split as `makeSleepBlocker`.
     private let micUsage: () -> MicUsage
 
+    /// Live speech detector on the microphone channel, for the quiet-room
+    /// auto-stop. One instance for the controller's lifetime, re-armed per
+    /// recording by the recorder factory. Injectable so the test factory can
+    /// hand in one whose model never loads.
+    private let micSpeech: MicSpeechMonitor
+
     init(
         settings: AppSettings,
         notifier: any AppNotifying,
@@ -143,6 +149,7 @@ final class WatchingController {
         askDeliverability: @escaping @Sendable () async -> AskDeliverability = { .unknown },
         takeNotes: @escaping (String) -> String? = { _ in nil },
         micUsage: @escaping () -> MicUsage = { MicUsageProbe.currentUsage() },
+        micSpeech: MicSpeechMonitor = MicSpeechMonitor(),
     ) {
         self.settings = settings
         self.notifier = notifier
@@ -160,6 +167,7 @@ final class WatchingController {
         self.recoverInterrupted = recoverInterrupted
         self.takeNotes = takeNotes
         self.micUsage = micUsage
+        self.micSpeech = micSpeech
     }
 
     // MARK: - Derived
@@ -278,6 +286,7 @@ final class WatchingController {
 
         pipeline.ensureQueue()
 
+        let micSpeechReading: () -> MicSpeechReading = { [micSpeech] in micSpeech.reading() }
         let loop = WatchLoop(
             recorderFactory: makeRecorderFactory(),
             pipelineQueue: pipeline.queue,
@@ -293,8 +302,9 @@ final class WatchingController {
             confirmationPolicy: confirmationPolicy,
             askDeliverability: askDeliverability,
             takeNotes: takeNotes,
-            autoStopWhenCallEnds: { [settings] in settings.autoStopWhenCallEnds },
+            autoStopWhenMeetingEnds: { [settings] in settings.autoStopWhenMeetingEnds },
             micUsage: micUsage,
+            micSpeech: micSpeechReading,
         )
         watchLoop = loop
 
@@ -417,17 +427,28 @@ final class WatchingController {
     /// the coordinator installs mic + app live sinks that pipe captured buffers to
     /// the `LiveTranscriptionController`. `async` so the coordinator can await the
     /// prior recording's stop-time flush before reusing a kept EOU session.
-    private func makeRecorderFactory() -> @MainActor () async -> any RecordingProvider {
+    func makeRecorderFactory() -> @MainActor () async -> any RecordingProvider {
         { [weak self, makeRecorder] in
             let recorder = makeRecorder()
             // Live captions tap the concrete recorder's buffer sinks, so this is
             // the production recorder or nothing. An injected double has no
             // sinks and needs none: captions are off in every test that uses one.
-            if let dualSource = recorder as? DualSourceRecorder {
-                await self?.liveTranscription.attachSinks(to: dualSource)
+            if let dualSource = recorder as? DualSourceRecorder, let self {
+                await self.liveTranscription.attachSinks(to: dualSource)
+                // After the captions: they may have installed their own mic
+                // sink, which a plain assignment here would replace.
+                self.installMicSpeechSink(on: dualSource)
             }
             return recorder
         }
+    }
+
+    /// Chain the speech detector behind whatever mic sink the recorder already
+    /// has, and arm it for this recording. The detector listens to the
+    /// microphone only; the app channel's sink is deliberately left alone.
+    private func installMicSpeechSink(on recorder: DualSourceRecorder) {
+        recorder.micLiveSink = micSpeech.sink(teeing: recorder.micLiveSink)
+        micSpeech.begin()
     }
 
     // MARK: - State-change handler
@@ -444,6 +465,7 @@ final class WatchingController {
             // before this transition fires); the buffered tail lives in the
             // streaming actors, not the recorder, so it survives the stop.
             if oldState == .recording {
+                self?.micSpeech.end()
                 Task { @MainActor in await self?.liveTranscription.flush() }
             }
             switch newState {
@@ -461,6 +483,9 @@ final class WatchingController {
                     notifier.notify(title: "Error", body: err)
                 }
                 self?.channelHealth.stop()
+                // A start that failed after the factory armed the detector never
+                // passed through `.recording`, so nothing else would release it.
+                self?.micSpeech.end()
 
             default:
                 self?.channelHealth.stop()

@@ -15,9 +15,9 @@ struct GeneralSettingsView: View {
             }
 
             Section("Recording") {
-                Toggle("Stop recording when the call ends", isOn: $settings.autoStopWhenCallEnds)
-                    .accessibilityIdentifier(A11yID.autoStopWhenCallEndsToggle)
-                Text("Saves the recording once the meeting app has released the microphone for two minutes.")
+                Toggle("Stop recording when the meeting ends", isOn: $settings.autoStopWhenMeetingEnds)
+                    .accessibilityIdentifier(A11yID.autoStopWhenMeetingEndsToggle)
+                Text("Saves the recording two minutes after a call app releases the microphone, or after ten minutes with nobody speaking.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

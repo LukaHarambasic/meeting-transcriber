@@ -56,9 +56,9 @@ final class CallEndPolicyTests: XCTestCase {
     func testSettingDefaultsOnAndPersists() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "call-end-setting-\(UUID().uuidString)"))
         let settings = AppSettings(defaults: defaults)
-        XCTAssertTrue(settings.autoStopWhenCallEnds, "the recording the user forgot to stop is the whole point")
-        settings.autoStopWhenCallEnds = false
-        XCTAssertFalse(AppSettings(defaults: defaults).autoStopWhenCallEnds, "the choice has to survive a relaunch")
+        XCTAssertTrue(settings.autoStopWhenMeetingEnds, "the recording the user forgot to stop is the whole point")
+        settings.autoStopWhenMeetingEnds = false
+        XCTAssertFalse(AppSettings(defaults: defaults).autoStopWhenMeetingEnds, "the choice has to survive a relaunch")
     }
 
     // MARK: - The call has to be seen

@@ -75,21 +75,21 @@ final class SettingsInteractionTests: XCTestCase {
     /// Asserts the opposite of what the control showed rather than a fixed value,
     /// so moving the default breaks no test about wiring. The default has its
     /// own test beside the call-end rule's.
-    func testAutoStopWhenCallEndsToggleWritesBackToSettings() throws {
+    func testAutoStopWhenMeetingEndsToggleWritesBackToSettings() throws {
         let settings = makeSettings()
-        let before = settings.autoStopWhenCallEnds
+        let before = settings.autoStopWhenMeetingEnds
         let view = GeneralSettingsView(settings: settings)
 
         let body = try view.inspect()
-        XCTAssertNoThrow(try body.find(viewWithAccessibilityIdentifier: A11yID.autoStopWhenCallEndsToggle))
+        XCTAssertNoThrow(try body.find(viewWithAccessibilityIdentifier: A11yID.autoStopWhenMeetingEndsToggle))
         // Located by label like the other bare-`Toggle` tests: a `Toggle` that
         // carries the identifier itself is not a container to search below.
         let toggle = try body.find(ViewType.Toggle.self) { toggle in
-            try toggle.labelView().text().string() == "Stop recording when the call ends"
+            try toggle.labelView().text().string() == "Stop recording when the meeting ends"
         }
         try toggle.tap()
 
-        XCTAssertEqual(settings.autoStopWhenCallEnds, !before, "the control must write the opposite of what it showed")
+        XCTAssertEqual(settings.autoStopWhenMeetingEnds, !before, "the control must write the opposite of what it showed")
     }
 
     // MARK: - LiveCaptionsOverlay render

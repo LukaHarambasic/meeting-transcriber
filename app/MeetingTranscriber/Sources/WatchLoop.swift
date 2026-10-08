@@ -134,11 +134,12 @@ class WatchLoop {
     /// also every existing test's expectation.
     let takeNotes: (String) -> String?
 
-    /// Dynamic accessor for `AppSettings.autoStopWhenCallEnds`, read at every
-    /// poll so toggling it mid-recording takes effect. Defaults to off for the
-    /// same reason as the probe above: the rule is opt-in at this seam and the
+    /// Dynamic accessor for `AppSettings.autoStopWhenMeetingEnds`, read at every
+    /// poll so toggling it mid-recording takes effect. It gates both end rules,
+    /// the call-end rule and the quiet-room rule. Defaults to off for the same
+    /// reason as the probe below: the rules are opt-in at this seam and the
     /// production wiring passes the real setting.
-    let autoStopWhenCallEnds: () -> Bool
+    let autoStopWhenMeetingEnds: () -> Bool
 
     /// Thresholds of the call-end rule. Injected whole so a test can drive both
     /// in virtual time.
@@ -149,6 +150,16 @@ class WatchLoop {
     /// defaults to `.unknown`, which `CallEndPolicy` treats as no evidence, so a
     /// test that does not mention it can never be stopped by the call-end rule.
     let micUsage: () -> MicUsage
+
+    /// What the live speech detector on the microphone has heard in this
+    /// recording. Defaults to `.unavailable`, which the quiet-room rule treats
+    /// as no evidence, so a test that does not mention it can never be stopped
+    /// by that rule.
+    let micSpeech: () -> MicSpeechReading
+
+    /// Threshold of the quiet-room rule. Injected whole so a test can drive the
+    /// window in virtual time.
+    let quietRoomPolicy: QuietRoomPolicy
 
     /// When this recording was last known to be wanted: its start, or the
     /// user's last confirmation. `private(set)` for the RPC snapshot and tests.
@@ -224,9 +235,11 @@ class WatchLoop {
         },
         askDeliverability: @MainActor @escaping () async -> AskDeliverability = { .unknown },
         takeNotes: @escaping (String) -> String? = { _ in nil },
-        autoStopWhenCallEnds: @escaping () -> Bool = { false },
+        autoStopWhenMeetingEnds: @escaping () -> Bool = { false },
         callEndPolicy: CallEndPolicy = CallEndPolicy(),
         micUsage: @escaping () -> MicUsage = { .unknown },
+        micSpeech: @escaping () -> MicSpeechReading = { .unavailable },
+        quietRoomPolicy: QuietRoomPolicy = QuietRoomPolicy(),
     ) {
         self.recorderFactory = recorderFactory
         self.pipelineQueue = pipelineQueue
@@ -246,9 +259,11 @@ class WatchLoop {
         self.salvageInterrupted = salvageInterrupted
         self.askDeliverability = askDeliverability
         self.takeNotes = takeNotes
-        self.autoStopWhenCallEnds = autoStopWhenCallEnds
+        self.autoStopWhenMeetingEnds = autoStopWhenMeetingEnds
         self.callEndPolicy = callEndPolicy
         self.micUsage = micUsage
+        self.micSpeech = micSpeech
+        self.quietRoomPolicy = quietRoomPolicy
     }
 
     nonisolated static var defaultOutputDir: URL {

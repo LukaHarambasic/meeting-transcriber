@@ -64,7 +64,7 @@ final class WatchLoopCallEndTests: XCTestCase {
             pidAliveCheck: { _ in true }, // never exits, so only the call-end rule can stop it
             sleepBlocker: SpySleepBlocker(),
             salvageInterrupted: { 0 },
-            autoStopWhenCallEnds: enabled,
+            autoStopWhenMeetingEnds: enabled,
             callEndPolicy: policy,
             micUsage: usage,
         )
@@ -223,9 +223,9 @@ final class WatchLoopCallEndTests: XCTestCase {
 
         let loop = try XCTUnwrap(controller.watchLoop)
         XCTAssertEqual(loop.micUsage(), .held, "the controller's probe never reached its loop")
-        XCTAssertTrue(loop.autoStopWhenCallEnds(), "the setting defaults to on and the loop must read it")
-        controller.settings.autoStopWhenCallEnds = false
-        XCTAssertFalse(loop.autoStopWhenCallEnds(), "the loop must read the live setting, not a copy")
+        XCTAssertTrue(loop.autoStopWhenMeetingEnds(), "the setting defaults to on and the loop must read it")
+        controller.settings.autoStopWhenMeetingEnds = false
+        XCTAssertFalse(loop.autoStopWhenMeetingEnds(), "the loop must read the live setting, not a copy")
     }
 }
 

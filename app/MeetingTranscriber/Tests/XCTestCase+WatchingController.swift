@@ -102,6 +102,10 @@ extension XCTestCase {
         // reads the machine's real CoreAudio process list, and which apps hold
         // the microphone while the suite runs is not something a test controls.
         micUsage: @escaping () -> MicUsage = { .unknown },
+        // Defaults to a detector whose model fails to load, for the same reason:
+        // the production one would load a CoreML model and listen to whatever
+        // buffers reach it. Its reading stays `.unavailable`.
+        micSpeech: MicSpeechMonitor = MicSpeechMonitor(makeClassifier: micSpeechModelThatCannotLoad),
     ) -> WatchingController {
         // Own defaults suite, like `makeRPCTestState`: `AppSettings()` on
         // `.standard` writes into the test host's real preferences, and
@@ -163,6 +167,18 @@ extension XCTestCase {
             confirmationPolicy: confirmationPolicy,
             recoverInterrupted: recoverInterrupted,
             micUsage: micUsage,
+            micSpeech: micSpeech,
         )
     }
+}
+
+/// Stands in for a speech model that cannot load. Named rather than written
+/// inline because `trailing_closure` rejects a closure literal in the final
+/// argument position.
+let micSpeechModelThatCannotLoad: @Sendable () async throws -> any SpeechChunkClassifying = {
+    throw MicSpeechTestError.noModel
+}
+
+enum MicSpeechTestError: Error {
+    case noModel
 }

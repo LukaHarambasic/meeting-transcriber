@@ -44,7 +44,7 @@ extension WatchLoop {
             // target already exited should end for that reason, with that log
             // line, rather than being attributed to an unanswered check.
             let now = nowProvider()
-            if stepCallEnd(state: &callEnd, now: now) { return }
+            if stepMeetingEnd(state: &callEnd, now: now) { return }
             // Sampled every poll, because the point is to catch speech whenever
             // it happens, not only when an ask is due.
             let attendance = sampleAttendance(now: now)
@@ -61,21 +61,34 @@ extension WatchLoop {
         }
     }
 
-    /// One call-end step, run from the monitor's poll. Returns true when the
+    /// One meeting-end step, run from the monitor's poll: the call-end rule and
+    /// the quiet-room rule, both behind the one setting. Returns true when the
     /// recording was stopped, so the monitor can exit rather than poll a loop
     /// that is now idle.
     ///
-    /// A disabled setting clears the state instead of merely skipping the step:
-    /// otherwise a run observed before it was switched off would still count as
-    /// unbroken after it is switched back on.
-    private func stepCallEnd(state: inout CallEndState, now: Date) -> Bool {
-        guard autoStopWhenCallEnds() else {
+    /// The microphone is sampled once and both rules read that sample, so they
+    /// can never disagree about whether another app held it on this poll. The
+    /// call-end rule is asked first: when both are due, the call is the better
+    /// explanation for the stop.
+    ///
+    /// A disabled setting clears the call-end state instead of merely skipping
+    /// the step: otherwise a run observed before it was switched off would still
+    /// count as unbroken after it is switched back on. The quiet-room rule has
+    /// no state to clear.
+    private func stepMeetingEnd(state: inout CallEndState, now: Date) -> Bool {
+        guard autoStopWhenMeetingEnds() else {
             state = CallEndState()
             return false
         }
+        let usage = micUsage()
+        return stepCallEnd(state: &state, usage: usage, now: now)
+            || stepQuietRoom(usage: usage, now: now)
+    }
+
+    private func stepCallEnd(state: inout CallEndState, usage: MicUsage, now: Date) -> Bool {
         let (next, decision) = callEndPolicy.step(
             state: state,
-            micUsage: micUsage(),
+            micUsage: usage,
             now: now,
         )
         state = next
@@ -89,6 +102,27 @@ extension WatchLoop {
         notifier.notify(
             title: "Recording Stopped",
             body: "The call ended, so the recording was stopped and saved.",
+            urgency: .standard,
+        )
+        return true
+    }
+
+    private func stepQuietRoom(usage: MicUsage, now: Date) -> Bool {
+        let decision = quietRoomPolicy.decide(
+            micSpeech: micSpeech(),
+            micUsage: usage,
+            now: now,
+        )
+        guard case let .stopQuiet(quietFor) = decision else { return false }
+        let quietSeconds = Int(quietFor)
+        logger.info("No speech on the microphone for \(quietSeconds)s, stopping manual recording")
+        stopManualRecording()
+        // Best effort only, for the same reason as the call-end notification.
+        let window = quietRoomPolicy.windowDescription
+        let body = "Nobody has spoken for \(window), so the recording was stopped and saved."
+        notifier.notify(
+            title: "Recording Stopped",
+            body: body,
             urgency: .standard,
         )
         return true
