@@ -173,28 +173,25 @@ cd meeting-transcriber
 
 ## Menu Bar Icon
 
-The app uses an animated waveform icon in the menu bar that reflects the current pipeline stage:
+The menu bar shows a waveform icon. It does not animate: the only change is a dot in the top-right corner while a recording is running.
 
 <p>
-<img src="docs/menu-bar-idle.gif" width="80" alt="Idle">&nbsp;&nbsp;
-<img src="docs/menu-bar-recording.gif" width="80" alt="Recording">&nbsp;&nbsp;
-<img src="docs/menu-bar-transcribing.gif" width="80" alt="Transcribing">&nbsp;&nbsp;
-<img src="docs/menu-bar-diarizing.gif" width="80" alt="Diarizing">&nbsp;&nbsp;
-<img src="docs/menu-bar-protocol.gif" width="80" alt="Protocol">
+<img src="docs/menu-bar-idle.png" width="80" alt="Not recording">&nbsp;&nbsp;
+<img src="docs/menu-bar-recording.png" width="80" alt="Recording">
 </p>
 
-**Idle** → **Recording** (a wave travels across the bars) → **Transcribing** (bars morph to text) → **Diarizing** (bars split into groups) → **Protocol** (lines appear sequentially)
+The current pipeline stage (transcribing, identifying speakers, writing the protocol) is shown as text in the menu.
 
-All of these are template images, so macOS renders them black or white to match your menu bar, the same as every other menu-bar icon.
+The icon is a template image, so macOS renders it black or white to match your menu bar, the same as every other menu-bar icon.
 
 ### The red dot means something is wrong
 
 <p>
-<img src="docs/menu-bar-error.gif" width="80" alt="Error while idle">&nbsp;&nbsp;
-<img src="docs/menu-bar-error-recording.gif" width="80" alt="Error while recording">
+<img src="docs/menu-bar-error.png" width="80" alt="Error while idle">&nbsp;&nbsp;
+<img src="docs/menu-bar-error-recording.png" width="80" alt="Error while recording">
 </p>
 
-Colour in the icon is reserved for exactly one thing: a problem. A red dot appears in the bottom-right corner, and **the menu says what it is** — one line naming the problem, plus a button that opens the System Settings pane that fixes it where one applies. The icon keeps animating underneath the dot, so a recording that hits a problem doesn't look like one that stopped.
+Colour in the icon is reserved for exactly one thing: a problem. A red dot appears in the bottom-right corner, and **the menu says what it is** — one line naming the problem, plus a button that opens the System Settings pane that fixes it where one applies. The recording dot stays in the top-right corner, so a recording that hits a problem still shows that it is recording.
 
 What raises it:
 

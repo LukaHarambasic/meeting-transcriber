@@ -90,7 +90,7 @@ State writes to `AppPaths.dataDir`; IPC + queue snapshots to `ipcDir`.
 | `MeetingTranscriberApp.swift` | `@main` UI shell — SwiftUI scenes, windows, NSOpenPanel, NSWorkspace. Observes `.showSettings` / `.closeSettings` / `.showSpeakerNaming` notifications for RPC- and pipeline-driven scene control |
 | `AppState.swift` | `@Observable @MainActor` composition root — wires the concern controllers (`engines`, `watching`, `pipeline`, `permissions`, `channelHealth`, `liveTranscription`, `rpcController`) and exposes the derived UI state (badge, status label) rather than owning it |
 | `MenuBarView.swift` | Menu bar dropdown (state, actions, meeting info) |
-| `MenuBarIcon.swift` | Renders the animated waveform icon + badge overlays (permission, record-only, channel-silent) |
+| `MenuBarIcon.swift` | Renders the static waveform icon, the recording dot and the red error dot |
 | `AudioImportTypes.swift` | File types offered by the batch-import and voice-enrollment `NSOpenPanel`s — single source of truth so the ffmpeg-gated vs. natively-decoded format lists stay pinned and testable |
 | `A11yID.swift` | Shared accessibility-identifier namespace — one constant per control, referenced by the view modifier, ViewInspector tests, and the `/ui/press` allowlist |
 | `SettingsView.swift` | Settings window — `TabView` shell hosting six topic-grouped sub-views in `Sources/Settings/` |
@@ -300,30 +300,29 @@ PipelineQueue: waiting → transcribing → [diarizing] → generatingProtocol �
 - Menu bar icon/label updates
 - macOS notifications (recording started, protocol ready, error)
 
-### Menu Bar Icon Animations
+### Menu Bar Icon
 
-`BadgeKind.compute(recordingActive:transcriberState:activeJobState:permissionProblem:)` is the pure function that maps the combined `WatchLoop` + `PipelineQueue` state into one of `BadgeKind.inactive | .recording | .transcribing | .diarizing | .processing | .userAction | .done | .error`. `MenuBarIcon.image(badge:animationFrame:errorOverlay:)` then renders the matching animation frame.
+`BadgeKind.compute(recordingActive:transcriberState:activeJobState:permissionProblem:)` is the pure function that maps the combined `WatchLoop` + `PipelineQueue` state into one of `BadgeKind.inactive | .recording | .transcribing | .diarizing | .processing | .userAction | .done | .error`. `/state.badge` reports it. `MenuBarIcon.image(badge:errorOverlay:)` renders the icon, and only `.recording` changes the drawing:
 
-| State | GIF | Triggered by | Code path |
-|-------|-----|--------------|-----------|
-| **Idle** | <img src="menu-bar-idle.gif" width="60"> | `WatchLoop.state == .idle` and `PipelineQueue` empty | `BadgeKind.inactive` |
-| **Recording** | <img src="menu-bar-recording.gif" width="60"> | `WatchLoop.state == .recording` (a wave travels across the bars) | `BadgeKind.recording` |
-| **Transcribing** | <img src="menu-bar-transcribing.gif" width="60"> | `PipelineJob.state == .transcribing / .recordingDone` (bars morph into text glyphs) | `BadgeKind.transcribing` |
-| **Diarizing** | <img src="menu-bar-diarizing.gif" width="60"> | `PipelineJob.state == .diarizing` (bars split into two speaker groups) | `BadgeKind.diarizing` |
-| **Protocol** | <img src="menu-bar-protocol.gif" width="60"> | `PipelineJob.state == .generatingProtocol` (lines appear sequentially) | `BadgeKind.processing` |
+| State | Icon | Triggered by |
+|-------|------|--------------|
+| **Not recording** | <img src="menu-bar-idle.png" width="60"> | every badge except `.recording` |
+| **Recording** | <img src="menu-bar-recording.png" width="60"> | `BadgeKind.recording` (`WatchLoop.state == .recording`) |
 
-The recording animation is a sine wave spread across the five bars and advanced one frame per tick (`MenuBarIcon.recordingBarHeight(bar:frame:)`), amplitude bounded to 0.30–0.70 of the icon height so no frame clips. It replaced six hand-written random-looking height rows, which at 18pt and 2.5 frames a second read as jitter rather than as sound.
+The icon used to animate every stage (a travelling wave while recording, bars morphing into text while transcribing, bars splitting while diarizing, lines typing out while writing the protocol) at 24 fps. All of that was replaced by one static waveform and a recording dot: "recording right now" is the only state worth noticing at a glance, and a dot says it without movement in the corner of the eye. The stage is still in the menu's label. A side effect: the process no longer emits a `FrontBoard:SceneClient` log line per animation frame.
+
+The recording dot is drawn in the template colour with a transparent ring cleared around it, so at 18pt it reads as a separate mark rather than fusing with the two right-hand bars it overlaps.
 
 ### Colour is reserved for errors
 
-Every state above renders as a **template image**, so AppKit inverts it for a light or dark menu bar and for the highlight the status item gets while its menu is open. The single exception is the red error dot, which forces non-template rendering (`MenuBarIcon.image(..., errorOverlay: true)`) because red does not survive template tinting.
+Both icons above render as a **template image**, so AppKit inverts it for a light or dark menu bar and for the highlight the status item gets while its menu is open. The single exception is the red error dot, which forces non-template rendering (`MenuBarIcon.image(..., errorOverlay: true)`) because red does not survive template tinting.
 
 <p>
-<img src="menu-bar-error.gif" width="80" alt="Error dot while idle">
-<img src="menu-bar-error-recording.gif" width="80" alt="Error dot while recording">
+<img src="menu-bar-error.png" width="80" alt="Error dot while idle">
+<img src="menu-bar-error-recording.png" width="80" alt="Error dot while recording">
 </p>
 
-`MenuBarIcon.drawErrorDot` composites a plain red dot in the bottom-right corner whenever `AppState.hasIssue` is true, i.e. whenever `AppState.currentIssue` resolves to a `RecordingIssue`. The badge body keeps animating underneath it, so a recording that hits a problem does not freeze into a static error icon that reads as "recording stopped".
+`MenuBarIcon.drawErrorDot` composites a plain red dot in the bottom-right corner whenever `AppState.hasIssue` is true, i.e. whenever `AppState.currentIssue` resolves to a `RecordingIssue`. The recording dot stays in the top-right corner, so a recording that hits a problem still shows that it is recording.
 
 **The dot and the menu's issue row read the same `currentIssue`**, which is the point: the icon can never show a problem the menu declines to name. Three earlier red marks were removed to get here — a record-only dot, a permission exclamation, and per-channel half-tinted bars — each of which forced a non-template image (so the icon stayed black-on-blue under the open-menu highlight) and none of which was explained anywhere in the UI.
 

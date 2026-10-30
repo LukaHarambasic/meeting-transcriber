@@ -8,7 +8,7 @@ included:
   - tools/meeting-simulator/Sources
   - tools/mt-cli/Sources
   - tools/mt-cli/Tests
-  - scripts/generate_menu_bar_gifs.swift
+  - scripts/generate_menu_bar_icons.swift
 
 excluded:
   - FluidAudio
