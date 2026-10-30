@@ -19,99 +19,32 @@ enum BadgeKind: String, CaseIterable, Codable {
     case userAction
     case done
     case error
-
-    /// Whether this badge kind uses animation.
-    var isAnimated: Bool {
-        switch self {
-        case .recording, .transcribing, .diarizing, .processing: true
-
-        default: false
-        }
-    }
 }
 
-/// Composites a menu bar icon (waveform + optional red error dot).
+/// Composites the menu bar icon: a static waveform, a dot while recording, and
+/// a red dot when something is wrong.
 ///
-/// The base icon is a waveform (5 vertical bars). Depending on the badge kind,
-/// the waveform animates differently:
-/// - `.recording`: a wave travels across the bars
-/// - `.transcribing`: bars morph into horizontal text lines (audio → text)
-/// - `.diarizing`: bars split into two groups (speaker separation)
-/// - `.processing`: text lines type out one after another (transcript being written)
+/// **Nothing animates.** The icon used to animate every pipeline stage (a wave
+/// while recording, bars morphing into text while transcribing, and so on) at
+/// 24 fps. That was replaced by one fixed waveform plus a recording dot: the
+/// only state worth noticing at a glance is "this is recording right now", and
+/// a dot says that without movement in the corner of the eye. The pipeline
+/// stage is still in the menu's label, and `BadgeKind` still reports it on
+/// `/state`.
 ///
 /// **Colour is reserved for exactly one thing: an error.** Everything else is a
 /// template image, so macOS inverts it for light and dark menu bars and for the
 /// highlight the status item gets while its menu is open, the way every other
-/// menu-bar icon behaves. Three earlier red marks — a record-only dot, a
-/// permission exclamation, and per-channel half-tinted bars — each forced a
-/// non-template image, and a non-template image does not invert: the icon stayed
-/// black-on-blue under the open-menu highlight, and a permanent red mark that
-/// was never explained anywhere in the UI read as decoration rather than as a
-/// problem. The one remaining red mark is `errorOverlay`, and the menu shows the
+/// menu-bar icon behaves. That includes the recording dot, which is drawn in
+/// the same template colour as the bars (black on a light menu bar, white on a
+/// dark one). The one red mark is `errorOverlay`, and the menu shows the
 /// matching `RecordingIssue` text whenever it is set.
 ///
-/// Rendered as template image — macOS handles light/dark mode automatically.
-/// `@MainActor` because cache initialisation, NSApp / NSAppearance reads, and
-/// `image(badge:…)` all need to run on the main actor. All known call sites
-/// (menu bar UI, `BadgeKind.compute(...)` consumers in AppState) are
-/// MainActor-bound already, so the annotation tightens the contract without
-/// breaking anyone.
+/// `@MainActor` because cache initialisation and NSAppearance reads need to run
+/// on the main actor. All call sites (menu bar UI, `BadgeKind.compute(...)`
+/// consumers in AppState) are MainActor-bound already.
 @MainActor
 enum MenuBarIcon {
-    /// Frames in one animation cycle. With `frameInterval` this is a 1.5 s loop.
-    nonisolated static let frameCount = 36
-
-    /// Seconds between frames: 24 fps.
-    ///
-    /// The previous pairing was 6 frames at 0.4 s, i.e. **2.5 fps**, which does
-    /// not read as motion at all — it reads as a handful of discrete poses, and
-    /// was reported as "looks like 4fps, it's not smooth". Frame count and
-    /// interval live together here because only their product is meaningful:
-    /// changing one alone either speeds the loop up or makes it choppy again.
-    ///
-    /// 24 fps over 36 frames keeps the 1.5 s cycle the old timing was reaching
-    /// for. The cost is the pre-rendered cache: 4 animated badges × 36 frames of
-    /// an 18 pt image, a few hundred KB, paid once at launch.
-    nonisolated static let frameInterval: TimeInterval = 1.0 / 24
-
-    /// Position within the cycle, `0..<1`. Every animation is a function of this
-    /// rather than of the raw frame index, so `frameCount` can change without
-    /// retuning each one — the trap that made the old six-element step tables
-    /// wrong the moment the frame count moved.
-    nonisolated static func phase(_ frame: Int) -> CGFloat {
-        CGFloat(frame % frameCount) / CGFloat(frameCount)
-    }
-
-    /// Smooth 0 → 1 → 0 across one cycle.
-    ///
-    /// Loops seamlessly: both the value and its slope match at the wrap, so a
-    /// morph eases out and back instead of snapping to its start. The step
-    /// tables this replaces ran 0 → 1 and then jumped, which at 2.5 fps was
-    /// indistinguishable from the general choppiness and at 24 fps would be the
-    /// one visible stutter per cycle.
-    nonisolated static func pingPong(_ frame: Int) -> CGFloat {
-        (1 - cos(2 * .pi * phase(frame))) / 2
-    }
-
-    /// Run-loop mode for the menu-bar animation timer (`AnimatedMenuBarIcon`).
-    ///
-    /// `.default`, not `.common`: `.common` includes `.eventTracking`, so the
-    /// timer would fire while the status-bar menu is tracked and deliver its
-    /// `@MainActor` tick from inside that nested run loop — which crashes in the
-    /// Swift concurrency executor check (`swift_task_isCurrentExecutor` →
-    /// EXC_BAD_ACCESS). Trade-off: the badge animation pauses while a menu is
-    /// open (cosmetic, sub-second) and resumes when tracking ends.
-    nonisolated static let animationRunLoopMode: RunLoop.Mode = .default
-
-    /// Returns the next animation frame for `badge`, or `current` if `badge`
-    /// is non-animated. Static badges (idle, error, …) ignore the timer tick
-    /// so the App scene's body does not re-evaluate every 0.4 s. Pure math —
-    /// `nonisolated` so it can be called from any context (tests, off-main).
-    nonisolated static func nextFrame(_ current: Int, badge: BadgeKind) -> Int {
-        guard badge.isAnimated else { return current }
-        return (current + 1) % frameCount
-    }
-
     // MARK: - Shared Layout Constants
 
     // All `nonisolated` because they're pure constants consumed from the
@@ -120,12 +53,14 @@ enum MenuBarIcon {
     nonisolated private static let barWidth: CGFloat = 2.2
     nonisolated private static let barSpacing: CGFloat = 3.6
     nonisolated private static let barCount = 5
-    nonisolated private static let defaultBarHeights: [CGFloat] = [0.25, 0.50, 0.75, 0.45, 0.30]
+    nonisolated private static let barHeights: [CGFloat] = [0.25, 0.50, 0.75, 0.45, 0.30]
 
-    nonisolated private static let lineHeight: CGFloat = 1.4
-    nonisolated private static let lineSpacing: CGFloat = 2.8
-    nonisolated private static let lineWidths: [CGFloat] = [0.70, 0.55, 0.65, 0.50, 0.40]
-    nonisolated private static let lineLeftInset: CGFloat = 0.12 // multiplied by rect width
+    /// Diameter of both corner dots, and the transparent ring cut around the
+    /// recording dot so it reads as a separate mark rather than merging into
+    /// the bars it overlaps.
+    nonisolated private static let dotSize: CGFloat = 6.0
+    nonisolated private static let dotMargin: CGFloat = 0.5
+    nonisolated private static let dotGap: CGFloat = 1.0
 
     /// Pure layout math used from the rendering closure (off-main during
     /// composition). `nonisolated` so the closure isn't forced onto MainActor.
@@ -134,61 +69,37 @@ enum MenuBarIcon {
         return (left: (rect.width - barsWidth) / 2, centerY: rect.height / 2)
     }
 
-    nonisolated static func textLayout(in rect: NSRect) -> (top: CGFloat, left: CGFloat) {
-        let linesHeight = CGFloat(barCount) * lineHeight + CGFloat(barCount - 1) * (lineSpacing - lineHeight)
-        return (top: rect.height / 2 + linesHeight / 2, left: rect.width * lineLeftInset)
-    }
-
     // MARK: - Cache
 
-    /// Pre-rendered frames keyed by BadgeKind. Populated once eagerly when
-    /// the type is first referenced. The type is `@MainActor`, so the
-    /// initialiser runs on MainActor and can safely read NSApp/NSAppearance.
-    private static let cache: [BadgeKind: [NSImage]] = {
-        var result: [BadgeKind: [NSImage]] = [:]
-        for badge in BadgeKind.allCases {
-            let count = badge.isAnimated ? frameCount : 1
-            result[badge] = (0 ..< count).map { frame in renderImage(badge: badge, frame: frame) }
-        }
-        return result
-    }()
+    /// The two template images, without and with the recording dot. Rendered
+    /// once when the type is first referenced.
+    private static let plain = renderImage(recording: false)
+    private static let recordingDot = renderImage(recording: true)
 
     // MARK: - Public
 
-    /// Returns a pre-rendered 18x18pt template `NSImage` for the given badge and animation frame.
+    /// Returns the 18x18pt menu bar icon for `badge`.
+    ///
+    /// Only `.recording` changes the drawing (it adds the dot); every other badge
+    /// renders the same waveform.
     ///
     /// `errorOverlay` composites a solid red dot in the bottom-right corner and
-    /// is the icon's only use of colour. It bypasses the pre-rendered cache and
-    /// forces a non-template image, because red would not survive template
-    /// rendering — and it is rendered per call rather than cached so it picks up
-    /// a light/dark switch that happened after launch.
-    ///
-    /// The badge body still animates underneath the dot: a recording that hits a
-    /// problem keeps moving *and* shows the dot, rather than freezing into a
-    /// static error icon that reads as "recording stopped".
-    static func image(
-        badge: BadgeKind,
-        animationFrame: Int = 0,
-        errorOverlay: Bool = false,
-    ) -> NSImage {
+    /// is the icon's only use of colour. It bypasses the cache and forces a
+    /// non-template image, because red would not survive template rendering,
+    /// and it is rendered per call so it picks up a light/dark switch that
+    /// happened after launch. The recording dot stays in its own corner, so a
+    /// recording that hits a problem shows both.
+    static func image(badge: BadgeKind, errorOverlay: Bool = false) -> NSImage {
+        let recording = badge == .recording
         if errorOverlay {
-            // Honour the cache's frame discipline: animated badges advance, static ones
-            // stay on frame 0. Without this, the live animationFrame leaks through and
-            // makes `.inactive` (idle waveform) bounce as if recording.
-            let frame = badge.isAnimated ? animationFrame : 0
-            return renderImage(badge: badge, frame: frame, errorOverlay: true)
+            return renderImage(recording: recording, errorOverlay: true)
         }
-        guard let frames = cache[badge] else { return renderImage(badge: badge, frame: animationFrame) }
-        return frames[animationFrame % frames.count]
+        return recording ? recordingDot : plain
     }
 
     // MARK: - Rendering
 
-    private static func renderImage(
-        badge: BadgeKind,
-        frame: Int,
-        errorOverlay: Bool = false,
-    ) -> NSImage {
+    private static func renderImage(recording: Bool, errorOverlay: Bool = false) -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             // `NSAppearance.currentDrawing()`, read HERE rather than hoisted, is
@@ -204,21 +115,21 @@ enum MenuBarIcon {
             //
             // Only AppKit knows the menu bar's effective appearance, and the way
             // it tells you is by invoking this closure with that appearance
-            // current. That is also why every non-error badge is a template
+            // current. That is also why every non-error icon is a template
             // image: AppKit then derives the colour itself and this question
             // never arises. `errorOverlay` cannot be a template (red would be
             // tinted away), so it has to ask — and this is the only place where
             // asking gets a truthful answer.
             let isDark = NSAppearance.currentDrawing()
                 .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            if errorOverlay {
-                (isDark ? NSColor.white : NSColor.black).setFill()
-            } else {
-                NSColor.black.setFill()
+            let ink = errorOverlay && isDark ? NSColor.white : NSColor.black
+            ink.setFill()
+
+            drawBars(in: rect)
+
+            if recording {
+                drawRecordingDot(in: rect, ink: ink)
             }
-
-            drawBadgeBody(badge: badge, in: rect, frame: frame)
-
             if errorOverlay {
                 drawErrorDot(in: rect)
             }
@@ -229,72 +140,12 @@ enum MenuBarIcon {
         return image
     }
 
-    /// Single dispatch for the badge's main body shape.
-    ///
-    /// Every non-animated badge draws `drawStaticBars`, i.e. `defaultBarHeights`
-    /// — which is also the shape the transcribing morph interpolates *from*, so
-    /// idle → transcribing starts where idle left off instead of jumping. The
-    /// old code drew `recordingFrames[0]` here, which happened to equal
-    /// `defaultBarHeights`; with the recording wave now computed rather than
-    /// tabulated that coincidence is gone, so the static shape is named.
-    private static func drawBadgeBody(badge: BadgeKind, in rect: NSRect, frame: Int) {
-        switch badge {
-        case .recording:
-            drawRecordingAnimation(in: rect, frame: frame)
-
-        case .transcribing:
-            drawTranscribingAnimation(in: rect, frame: frame)
-
-        case .diarizing:
-            drawDiarizingAnimation(in: rect, frame: frame)
-
-        case .processing:
-            drawProtocolAnimation(in: rect, frame: frame)
-
-        case .inactive, .userAction, .done, .error:
-            drawStaticBars(in: rect)
-        }
-    }
-
-    /// The resting waveform: five bars at `defaultBarHeights`. Drawn for every
-    /// badge that does not animate.
-    private static func drawStaticBars(in rect: NSRect) {
-        drawBars(in: rect, heights: defaultBarHeights)
-    }
-
-    // MARK: - Recording Animation (a wave travelling across the bars)
-
-    /// Bar height as a fraction of the icon, for one bar on one frame.
-    ///
-    /// A sine wave rather than the six hand-written height rows this replaces.
-    /// Those rows were random-looking by design — "bars bounce like a live audio
-    /// signal" — and at 18pt and 2.5 frames a second the result read as jitter
-    /// rather than as sound. One wave phase spread across the five bars and
-    /// advanced by one frame per tick gives a calm, obviously-periodic motion
-    /// that says "running" without competing for attention, and it loops
-    /// seamlessly for any `frameCount` because both offsets are full turns.
-    ///
-    /// Amplitude stops well short of the icon's edges (0.30…0.70 of the height)
-    /// so no frame clips and the wave keeps a visible baseline.
-    nonisolated static func recordingBarHeight(bar: Int, frame: Int) -> CGFloat {
-        let framePhase = 2 * CGFloat.pi * phase(frame)
-        let barPhase = 2 * CGFloat.pi * CGFloat(bar) / CGFloat(barCount)
-        let unit = (sin(framePhase + barPhase) + 1) / 2 // 0…1
-        return 0.30 + 0.40 * unit
-    }
-
-    private static func drawRecordingAnimation(in rect: NSRect, frame: Int) {
-        drawBars(in: rect, heights: (0 ..< barCount).map { recordingBarHeight(bar: $0, frame: frame) })
-    }
-
-    /// Draw the five centred, capsule-ended bars at the given fractional
-    /// heights. Shared by the wave and the resting shape so the two cannot
-    /// drift in width, spacing or corner radius.
-    private static func drawBars(in rect: NSRect, heights: [CGFloat]) {
+    /// The five centred, capsule-ended bars.
+    private static func drawBars(in rect: NSRect) {
         let layout = barsLayout(in: rect)
-        for i in 0 ..< min(barCount, heights.count) {
+        for i in 0 ..< barCount {
             let x = layout.left + CGFloat(i) * barSpacing
-            let barH = rect.height * heights[i]
+            let barH = rect.height * barHeights[i]
             let barRect = NSRect(
                 x: x,
                 y: layout.centerY - barH / 2,
@@ -305,110 +156,38 @@ enum MenuBarIcon {
         }
     }
 
-    // MARK: - Transcribing Animation (waveform → text lines)
-
-    private static func drawTranscribingAnimation(in rect: NSRect, frame: Int) {
-        let h = rect.height
-        let t = pingPong(frame)
-        let bars = barsLayout(in: rect)
-        let text = textLayout(in: rect)
-
-        for i in 0 ..< barCount {
-            // Source: vertical bar
-            let srcX = bars.left + CGFloat(i) * barSpacing
-            let srcH = h * defaultBarHeights[i]
-            let srcY = bars.centerY - srcH / 2
-
-            // Target: horizontal text line
-            let tgtX = text.left
-            let tgtW = rect.width * lineWidths[i]
-            let tgtY = text.top - CGFloat(i) * lineSpacing - lineHeight
-
-            // Interpolate
-            let x = srcX + (tgtX - srcX) * t
-            let y = srcY + (tgtY - srcY) * t
-            let rw = barWidth + (tgtW - barWidth) * t
-            let rh = srcH + (lineHeight - srcH) * t
-            let radius = min(rw, rh) / 2
-
-            NSBezierPath(
-                roundedRect: NSRect(x: x, y: y, width: rw, height: rh),
-                xRadius: radius,
-                yRadius: radius,
-            ).fill()
-        }
-    }
-
-    // MARK: - Diarizing Animation (bars split into two speaker groups)
-
-    private static func drawDiarizingAnimation(in rect: NSRect, frame: Int) {
-        let h = rect.height
-        let t = pingPong(frame)
-        let layout = barsLayout(in: rect)
-
-        let maxShift: CGFloat = 2.5
-        let verticalSep: CGFloat = 1.5
-
-        for i in 0 ..< barCount {
-            let isGroupA = i.isMultiple(of: 2)
-            let barH = h * defaultBarHeights[i]
-
-            let x = layout.left + CGFloat(i) * barSpacing + (isGroupA ? -maxShift : maxShift) * t
-            let y = layout.centerY - barH / 2 + (isGroupA ? verticalSep : -verticalSep) * t
-
-            NSBezierPath(
-                roundedRect: NSRect(x: x, y: y, width: barWidth, height: barH),
-                xRadius: barWidth / 2,
-                yRadius: barWidth / 2,
-            ).fill()
-        }
+    /// Recording: a dot in the top-right corner, in the icon's own ink.
+    ///
+    /// The bars reach that corner, so a transparent ring is cleared first; a dot
+    /// drawn straight over them would fuse with the two right-hand bars into one
+    /// blob at 18pt.
+    private static func drawRecordingDot(in rect: NSRect, ink: NSColor) {
+        let center = NSPoint(
+            x: rect.maxX - dotSize / 2 - dotMargin,
+            y: rect.maxY - dotSize / 2 - dotMargin,
+        )
+        let ringSize = dotSize + 2 * dotGap
+        NSGraphicsContext.current?.compositingOperation = .clear
+        NSBezierPath(ovalIn: circle(at: center, size: ringSize)).fill()
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        ink.setFill()
+        NSBezierPath(ovalIn: circle(at: center, size: dotSize)).fill()
     }
 
     // MARK: - Error Dot (solid red dot in bottom-right)
 
     /// The icon's only coloured mark: something is wrong, and the menu says what.
-    ///
-    /// A plain dot, not the exclamation-in-a-circle it replaces. At 18pt the
-    /// white "!" inside a 7pt circle was a smudge rather than a glyph, so it
-    /// carried no more meaning than a dot while taking more room and forcing
-    /// white into an otherwise two-colour icon.
     private static func drawErrorDot(in rect: NSRect) {
-        let size: CGFloat = 6.0
-        let margin: CGFloat = 0.5
-        let cx = rect.maxX - size / 2 - margin
-        let cy = rect.minY + size / 2 + margin
-
+        let center = NSPoint(
+            x: rect.maxX - dotSize / 2 - dotMargin,
+            y: rect.minY + dotSize / 2 + dotMargin,
+        )
         NSColor.systemRed.setFill()
-        NSBezierPath(
-            ovalIn: NSRect(x: cx - size / 2, y: cy - size / 2, width: size, height: size),
-        ).fill()
+        NSBezierPath(ovalIn: circle(at: center, size: dotSize)).fill()
     }
 
-    // MARK: - Protocol Generation Animation (text lines appearing sequentially)
-
-    /// Each line types out in turn, growing from a dot to its full width.
-    ///
-    /// A line that simply appeared would leave only `barCount` distinct images
-    /// across the whole cycle, one new pose every 0.3 s. That is the "discrete
-    /// poses, not motion" the 24 fps change set out to remove, and it made this
-    /// the one badge still stepping. Growing the active line gives every frame
-    /// its own image while keeping the reveal spread across the whole cycle,
-    /// tied to `phase` rather than `frameCount`.
-    private static func drawProtocolAnimation(in rect: NSRect, frame: Int) {
-        let text = textLayout(in: rect)
-        let progress = phase(frame) * CGFloat(barCount)
-
-        for i in 0 ..< barCount where progress >= CGFloat(i) {
-            let typed = min(progress - CGFloat(i), 1)
-            let fullWidth = rect.width * lineWidths[i]
-            let lineW = lineHeight + (fullWidth - lineHeight) * typed
-            let lineY = text.top - CGFloat(i) * lineSpacing - lineHeight
-            NSBezierPath(
-                roundedRect: NSRect(x: text.left, y: lineY, width: lineW, height: lineHeight),
-                xRadius: lineHeight / 2,
-                yRadius: lineHeight / 2,
-            ).fill()
-        }
+    private static func circle(at center: NSPoint, size: CGFloat) -> NSRect {
+        NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
     }
 }
 

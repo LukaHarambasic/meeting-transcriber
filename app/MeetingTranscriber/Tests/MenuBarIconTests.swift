@@ -44,8 +44,8 @@ final class MenuBarIconTests: XCTestCase {
     }
 
     func testErrorOverlayChangesTheRenderedImage() {
-        let plain = MenuBarIcon.image(badge: .inactive, animationFrame: 0)
-        let dotted = MenuBarIcon.image(badge: .inactive, animationFrame: 0, errorOverlay: true)
+        let plain = MenuBarIcon.image(badge: .inactive)
+        let dotted = MenuBarIcon.image(badge: .inactive, errorOverlay: true)
         XCTAssertNotEqual(
             plain.tiffRepresentation,
             dotted.tiffRepresentation,
@@ -102,42 +102,45 @@ final class MenuBarIconTests: XCTestCase {
     }
 
     func testErrorOverlayDefaultsOff() {
-        let withoutParam = MenuBarIcon.image(badge: .recording, animationFrame: 0)
-        let explicitFalse = MenuBarIcon.image(badge: .recording, animationFrame: 0, errorOverlay: false)
+        let withoutParam = MenuBarIcon.image(badge: .recording)
+        let explicitFalse = MenuBarIcon.image(badge: .recording, errorOverlay: false)
         XCTAssertEqual(withoutParam.isTemplate, explicitFalse.isTemplate)
         XCTAssertEqual(withoutParam.tiffRepresentation, explicitFalse.tiffRepresentation)
     }
 
-    /// Regression test: a non-animated badge rendered with the error overlay must
-    /// NOT pick up the live `animationFrame` — otherwise the idle waveform
-    /// bounces as if recording. See MenuBarIcon.image(...) frame-clamp logic.
-    func testErrorOverlayDoesNotAnimateStaticBadges() {
-        let staticBadges: [BadgeKind] = [.inactive, .userAction, .done, .error]
-        for badge in staticBadges {
-            let frame0 = MenuBarIcon.image(badge: badge, animationFrame: 0, errorOverlay: true)
-            let frame3 = MenuBarIcon.image(badge: badge, animationFrame: 3, errorOverlay: true)
+    // MARK: - Recording dot (the icon's only state change)
+
+    /// The dot is the whole signal for "recording right now", so it must
+    /// actually change the drawing.
+    func testRecordingAddsADot() {
+        XCTAssertNotEqual(
+            MenuBarIcon.image(badge: .recording).tiffRepresentation,
+            MenuBarIcon.image(badge: .inactive).tiffRepresentation,
+            "recording must draw the dot",
+        )
+    }
+
+    /// No dot and no stage-specific drawing for anything but recording: every
+    /// other badge, including the pipeline stages that used to animate, renders
+    /// exactly the idle waveform.
+    func testEveryOtherBadgeRendersTheIdleIcon() {
+        let idle = MenuBarIcon.image(badge: .inactive).tiffRepresentation
+        for badge in BadgeKind.allCases where badge != .recording {
             XCTAssertEqual(
-                frame0.tiffRepresentation,
-                frame3.tiffRepresentation,
-                "Static badge \(badge) should render identically across frames under errorOverlay",
+                MenuBarIcon.image(badge: badge).tiffRepresentation, idle,
+                "\(badge) must render the plain waveform with no dot",
             )
         }
     }
 
-    /// Inverse check, and a requirement in its own right: a recording that hits a
-    /// problem keeps animating *under* the dot. Freezing it would say "recording
-    /// stopped" about a recording that is still running.
-    func testErrorOverlayKeepsAnimatedBadgesAnimating() {
-        let animatedBadges: [BadgeKind] = [.recording, .transcribing, .diarizing, .processing]
-        for badge in animatedBadges {
-            let frame0 = MenuBarIcon.image(badge: badge, animationFrame: 0, errorOverlay: true)
-            let frame3 = MenuBarIcon.image(badge: badge, animationFrame: 3, errorOverlay: true)
-            XCTAssertNotEqual(
-                frame0.tiffRepresentation,
-                frame3.tiffRepresentation,
-                "Animated badge \(badge) should advance under errorOverlay",
-            )
-        }
+    /// The dot sits in its own corner, away from the red error dot, so a
+    /// recording that hits a problem still shows that it is recording.
+    func testRecordingDotSurvivesTheErrorOverlay() {
+        XCTAssertNotEqual(
+            MenuBarIcon.image(badge: .recording, errorOverlay: true).tiffRepresentation,
+            MenuBarIcon.image(badge: .inactive, errorOverlay: true).tiffRepresentation,
+            "the recording dot must still be drawn under the error overlay",
+        )
     }
 
     // MARK: - Layout Math
@@ -156,22 +159,6 @@ final class MenuBarIconTests: XCTestCase {
         let rect = NSRect(x: 0, y: 0, width: 18, height: 18)
         let layout = MenuBarIcon.barsLayout(in: rect)
         XCTAssertEqual(layout.centerY, 9.0, accuracy: 0.01)
-    }
-
-    func testTextLayoutLeft() {
-        let rect = NSRect(x: 0, y: 0, width: 18, height: 18)
-        let layout = MenuBarIcon.textLayout(in: rect)
-        XCTAssertEqual(layout.left, 18 * 0.12, accuracy: 0.01)
-    }
-
-    func testTextLayoutTopCentersVertically() {
-        let rect = NSRect(x: 0, y: 0, width: 18, height: 18)
-        let layout = MenuBarIcon.textLayout(in: rect)
-        // 5 lines × 1.4 height + 4 gaps × (2.8 - 1.4) = 7 + 5.6 = 12.6
-        // top = 9 + 12.6/2 = 15.3
-        let linesHeight: CGFloat = 5 * 1.4 + 4 * (2.8 - 1.4)
-        let expectedTop = 18.0 / 2 + linesHeight / 2
-        XCTAssertEqual(layout.top, expectedTop, accuracy: 0.01)
     }
 
     // MARK: - BadgeKind.compute()

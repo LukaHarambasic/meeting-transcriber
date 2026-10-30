@@ -11,42 +11,17 @@ extension Notification.Name {
     static let closeNotes = Notification.Name("closeNotes")
 }
 
-/// Renders the menu-bar icon and ticks the animation frame in its own
-/// view body. Keeping the timer + frame @State scoped here means the
-/// surrounding `MeetingTranscriberApp` scene body never re-evaluates on
-/// each tick — only this view does. Without this isolation, animating
-/// badges (recording, transcribing, …) would cascade re-renders through
-/// every open Window.
-private struct AnimatedMenuBarIcon: View {
+/// Renders the menu-bar icon. Static: see `MenuBarIcon` for why it no longer
+/// animates.
+private struct MenuBarIconView: View {
     let badge: BadgeKind
     /// Whether to composite the red error dot. One flag, not the four overlay
     /// inputs this replaces — see `MenuBarIcon` for why colour is now reserved
     /// for a single meaning.
     let errorOverlay: Bool
 
-    @State private var animationFrame = 0
-    // `.default` (not `.common`) so the timer never fires inside the status-bar
-    // menu's tracking loop — see MenuBarIcon.animationRunLoopMode for why.
-    //
-    // The interval comes from `MenuBarIcon` rather than being written here: it
-    // is only meaningful against `frameCount`, and this file holding a separate
-    // 0.4 s was how the animation ended up running at 2.5 fps.
-    private let iconTimer = Timer.publish(
-        every: MenuBarIcon.frameInterval, on: .main, in: MenuBarIcon.animationRunLoopMode,
-    ).autoconnect()
-
     var body: some View {
-        Image(nsImage: MenuBarIcon.image(
-            badge: badge,
-            animationFrame: animationFrame,
-            errorOverlay: errorOverlay,
-        ))
-        .onReceive(iconTimer) { _ in
-            let next = MenuBarIcon.nextFrame(animationFrame, badge: badge)
-            if next != animationFrame {
-                animationFrame = next
-            }
-        }
+        Image(nsImage: MenuBarIcon.image(badge: badge, errorOverlay: errorOverlay))
     }
 }
 
@@ -159,7 +134,7 @@ struct MeetingTranscriberApp: App {
             Label {
                 Text(appState.currentStateLabel)
             } icon: {
-                AnimatedMenuBarIcon(
+                MenuBarIconView(
                     badge: appState.currentBadge,
                     // The dot and the menu's issue row read the same
                     // `currentIssue`, so the icon can never show a problem the
