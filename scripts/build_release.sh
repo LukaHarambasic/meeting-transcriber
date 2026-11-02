@@ -24,6 +24,19 @@ detect_sign_hash() {
         | grep -oE '[0-9A-F]{40}' | head -1 || true
 }
 
+# Unlocks the keychain scripts/setup-self-hosted-runner.sh creates for the local
+# signing identity. It is created with an EMPTY password, and it is in the search
+# list, so detect_sign_hash finds the identity there; but while it is locked,
+# codesign asks for its password (which is not the login or admin password), and
+# from a session that cannot show that dialog it fails with errSecInternalComponent.
+# scripts/lib/signing.sh unlocks it the same way for the e2e lanes. No-op when the
+# keychain does not exist.
+unlock_dev_keychain() {
+    local keychain="${DEV_KEYCHAIN:-$HOME/Library/Keychains/meetingtranscriber-dev.keychain-db}"
+    [ -f "$keychain" ] || return 0
+    security unlock-keychain -p "" "$keychain" 2>/dev/null || true
+}
+
 # === Source guard: only run the build when executed, not when sourced ===
 
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
@@ -219,6 +232,7 @@ if [ "$NOTARIZE" = true ]; then
     fi
 else
     # Use local development certificate if available (extract 40-char hex SHA-1 hash)
+    unlock_dev_keychain
     SIGN_HASH=$(detect_sign_hash)
     if [ -n "$SIGN_HASH" ]; then
         codesign --deep --force --sign "$SIGN_HASH" --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
